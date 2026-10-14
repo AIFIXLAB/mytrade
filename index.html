@@ -29,29 +29,25 @@ textarea{background:#0e1421;border:1px solid #222c3f;color:#e8edf6;border-radius
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
 const $=s=>document.querySelector(s),LS=(k,v)=>v===undefined?JSON.parse(localStorage.getItem(k)||'null'):localStorage.setItem(k,JSON.stringify(v));
-const KEY='db68gqpr01qmd5lim78g';
-const UNI='NVDA,TSLA,AMD,PLTR,SMCI,AAPL,MSFT,META,AMZN,GOOGL,NFLX,COIN,MSTR,HOOD,SOFI,RIVN,LCID,NIO,AFRM,UPST,SNAP,RBLX,U,DKNG,MARA,RIOT,CLSK,HIMS,RKLB,IONQ,RGTI,SOUN,JOBY,ACHR,CVNA,SHOP,ROKU,PYPL,UBER,INTC,MU,AVGO,ARM,SNOW,CRWD,DDOG,NET,AI,BBAI,OKLO';
 const cfg=()=>LS('cfg')||{};let sb=null,FX=35,tab='scan',scan=LS('lastScan')||[];
 function initSb(){const c=cfg();try{if(c.sbu&&c.sbk)sb=supabase.createClient(c.sbu,c.sbk)}catch(e){}}
-async function fh(p,q=''){const r=await fetch(`https://finnhub.io/api/v1/${p}?${q}${q?'&':''}token=${cfg().fh||KEY}`);if(r.status==429)throw Error('เรียกถี่เกิน (60 ครั้ง/นาที) รอสักครู่แล้วลองใหม่');if(!r.ok)throw Error('API '+r.status);return r.json()}
-const dstr=d=>new Date(d).toISOString().slice(0,10);
-const news=async(s,days=3)=>(await fh('company-news',`symbol=${s}&from=${dstr(Date.now()-days*864e5)}&to=${dstr(Date.now())}`)).slice(0,8).map(n=>({title:n.headline,text:n.summary,url:n.url,site:n.source,publishedDate:dstr(n.datetime*1000)}));
+async function A(mode,q=''){let r,d;try{r=await fetch(`/api/market?mode=${mode}&${q}`);d=await r.json()}catch(e){throw Error('เรียก /api/market ไม่ได้ ต้องอัปโหลดทั้ง index.html และโฟลเดอร์ api ขึ้น Vercel')}
+ if(!r.ok||d.error)throw Error(d.error||'API '+r.status);return d}
 const f=(n,d=2)=>n==null||isNaN(n)?'-':(+n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
-const pc=n=>`<span class="${n>=0?'up':'dn'}">${n>=0?'+':''}${f(n)}%</span>`;
+const pc=n=>n==null?'-':`<span class="${n>=0?'up':'dn'}">${n>=0?'+':''}${f(n)}%</span>`;
 const today=()=>new Date().toISOString().slice(0,10),cl=(x,a,b)=>Math.max(a,Math.min(b,x));
-const POS='surge,beat,beats,upgrade,record,growth,soar,jump,approval,approved,partnership,contract,raises,raised,profit,bullish,breakout,buyback,wins,launch,strong'.split(','),
-NEG='miss,downgrade,lawsuit,probe,plunge,fall,falls,cut,cuts,loss,bearish,offering,dilution,recall,fraud,halt,decline,weak,warning,investigation,delist'.split(',');
-function sent(ns){let s=0;ns.forEach(n=>{const t=((n.title||'')+' '+(n.text||'')).toLowerCase();POS.forEach(w=>{if(t.includes(w))s++});NEG.forEach(w=>{if(t.includes(w))s--})});return s}
-function score(x){const g=cl(x.chg,0,10)/10*40,st=x.h>x.l?(x.price-x.l)/(x.h-x.l)*25:0,n=cl(x.sent,-5,5)/5*25,p=x.price>=2&&x.price<=500?10:0;return Math.round(cl(g+st+n+p,0,100))}
+const cap=n=>!n?'-':n>=1e9?f(n/1e9,1)+'B':f(n/1e6,0)+'M';
+const dt=t=>new Date(t*1000).toISOString().slice(0,10);
+const POS='surge,surges,beat,beats,upgrade,upgraded,record,growth,soar,soars,jump,jumps,approval,approved,partnership,contract,raises,raised,profit,bullish,breakout,buyback,wins,launch,strong,rally,rallies,deal,acquire,acquisition,boost,top'.split(','),
+NEG='miss,misses,downgrade,downgraded,lawsuit,probe,plunge,plunges,fall,falls,cut,cuts,loss,bearish,offering,dilution,recall,fraud,halt,decline,weak,warning,investigation,delist,sinks,drops,tumble,slump'.split(',');
+function sent(ns){let s=0;(ns||[]).forEach(n=>{const w=(n.title||'').toLowerCase().split(/[^a-z]+/);w.forEach(x=>{if(POS.includes(x))s++;if(NEG.includes(x))s--})});return s}
+function score(x){const gap=x.pre!=null?x.pre:x.chg,g=cl(gap,0,15)/15*40,rv=x.avgVol?cl(x.vol/x.avgVol,0,5)/5*25:0,n=cl(x.sent,-4,4)/4*25,p=(x.price>=2?5:0)+(x.mcap>3e8?5:0);return Math.round(cl(g+rv+n+p,0,100))}
 const sc=s=>s>=60?'background:#12432f;color:#16c784':s>=40?'background:#4a3b12;color:#f5b942':'background:#3a1a1d;color:#ea3943';
-async function doScan(){const el=$('#st');el.textContent='กำลังดึงราคา…';
- try{const uni=(cfg().uni||UNI).split(/[\s,]+/).filter(Boolean).map(x=>x.toUpperCase()).slice(0,45),qs=[];
-  for(let i=0;i<uni.length;i+=10){const r=await Promise.all(uni.slice(i,i+10).map(s=>fh('quote','symbol='+s).then(q=>({s,q})).catch(()=>null)));qs.push(...r.filter(Boolean));el.textContent=`ดึงราคา ${Math.min(i+10,uni.length)}/${uni.length}`}
-  let l=qs.filter(x=>x.q&&x.q.c>1&&x.q.pc).map(({s,q})=>({sym:s,price:q.c,chg:q.dp,o:q.o,h:q.h,l:q.l,pc:q.pc,sent:0,news:[]})).sort((a,b)=>b.chg-a.chg).slice(0,12);
-  for(const x of l.slice(0,10)){el.textContent='วิเคราะห์ข่าว '+x.sym+'…';try{x.news=await news(x.sym);x.sent=sent(x.news)}catch(e){}}
-  l.forEach(x=>x.score=score(x));l.sort((a,b)=>b.score-a.score);scan=l;LS('lastScan',l);LS('scanTime',new Date().toLocaleString('th-TH'));saveRank(l);render()
- }catch(e){el.textContent='⚠️ '+e.message}}
-async function saveRank(o){const d=today(),rows=o.map((x,i)=>({day:d,sym:x.sym,rank:i+1,score:x.score,gap:x.chg,price:x.price}));
+async function doScan(){const el=$('#st');el.textContent='กำลังสแกนตลาด…';
+ try{const{list}=await A('scan');list.forEach(x=>{x.news=x.news||[];x.sent=sent(x.news);x.rv=x.avgVol?x.vol/x.avgVol:null;x.score=score(x)});list.sort((a,b)=>b.score-a.score);
+  if(!list.length)throw Error('ไม่พบหุ้น');scan=list;LS('lastScan',list);LS('scanTime',new Date().toLocaleString('th-TH'));saveRank(list);render()}
+ catch(e){el.innerHTML='⚠️ '+e.message}}
+async function saveRank(o){const d=today(),rows=o.slice(0,15).map((x,i)=>({day:d,sym:x.sym,rank:i+1,score:x.score,gap:x.pre!=null?x.pre:x.chg,price:x.price}));
  const h=LS('rank')||{};h[d]=rows;LS('rank',h);if(sb)try{await sb.from('rankings').upsert(rows,{onConflict:'day,sym'})}catch(e){}}
 async function getPort(){if(sb)try{const{data,error}=await sb.from('portfolio').select('*');if(!error)return data}catch(e){}return LS('port')||[]}
 async function addPos(){const s=$('#ps').value.trim().toUpperCase(),n=+$('#pn').value,c=+$('#pc').value;if(!s||!n||!c)return;
@@ -59,29 +55,31 @@ async function addPos(){const s=$('#ps').value.trim().toUpperCase(),n=+$('#pn').
  const p=LS('port')||[];p.push({id:Date.now(),sym:s,shares:n,cost:c});LS('port',p);render()}
 async function delPos(id){if(sb){await sb.from('portfolio').delete().eq('id',id)}LS('port',(LS('port')||[]).filter(x=>x.id!=id));render()}
 async function chart(sym,cost){$('#modal').style.display='flex';$('#sheet').innerHTML='โหลด…';
- try{const q=await fh('quote','symbol='+sym);let v=null;
-  try{const t=Math.floor(Date.now()/1000),c=await fh('stock/candle',`symbol=${sym}&resolution=D&from=${t-130*86400}&to=${t}`);if(c.s==='ok')v=c.c.slice(-90)}catch(e){}
-  let ns=[];try{ns=await news(sym,5)}catch(e){}const W=340,H=170;let svg='',sub='';
-  if(v){const mn=Math.min(...v,cost||1e9),mx=Math.max(...v,cost||0),X=i=>i/(v.length-1)*W,Y=y=>H-(y-mn)/(mx-mn||1)*H;
-   svg=`<svg viewBox="0 0 ${W} ${H}" width="100%"><polyline points="${v.map((y,i)=>X(i)+','+Y(y)).join(' ')}" fill="none" stroke="${v[v.length-1]>=v[0]?'#16c784':'#ea3943'}" stroke-width="2"/>${cost?`<line x1="0" x2="${W}" y1="${Y(cost)}" y2="${Y(cost)}" stroke="#f5b942" stroke-dasharray="4"/><text x="4" y="${Y(cost)-4}" fill="#f5b942" font-size="10">ต้นทุน $${f(cost)}</text>`:''}</svg>`;sub='กราฟรายวัน 90 วัน'}
-  else{const mn=Math.min(q.l,cost||1e9),mx=Math.max(q.h,cost||0),X=y=>20+(y-mn)/(mx-mn||1)*300;
-   svg=`<svg viewBox="0 0 340 90" width="100%"><line x1="${X(q.l)}" x2="${X(q.h)}" y1="45" y2="45" stroke="#5b8cff" stroke-width="8" stroke-linecap="round"/><circle cx="${X(q.c)}" cy="45" r="8" fill="${q.c>=q.pc?'#16c784':'#ea3943'}"/><text x="${X(q.c)}" y="25" fill="#fff" font-size="10" text-anchor="middle">ตอนนี้ ${f(q.c)}</text>${cost?`<line x1="${X(cost)}" x2="${X(cost)}" y1="30" y2="65" stroke="#f5b942" stroke-width="2"/><text x="${X(cost)}" y="80" fill="#f5b942" font-size="10" text-anchor="middle">ต้นทุน ${f(cost)}</text>`:''}</svg>`;sub='ช่วงราคาวันนี้ (กราฟย้อนหลังต้องใช้ Finnhub แพ็กเสียเงิน)'}
-  $('#sheet').innerHTML=`<div class="row"><b class="sym">${sym}</b><button class="btn2" onclick="$('#modal').style.display='none'">ปิด</button></div><small>${sub}</small><div style="margin:10px 0">${svg}</div>
-  <div class="row mu"><span>เปิด $${f(q.o)}</span><span>สูง $${f(q.h)}</span><span>ต่ำ $${f(q.l)}</span><span>ปิดก่อน $${f(q.pc)}</span></div><h4>ข่าวล่าสุด (คะแนน ${sent(ns)>=0?'+':''}${sent(ns)})</h4>`+(ns.map(n=>`<div class="n"><a href="${n.url}" target="_blank">${n.title}</a><br><small>${n.site||''} · ${n.publishedDate}</small></div>`).join('')||'<small>ไม่มีข่าว</small>')
+ try{const[c,nw]=await Promise.all([A('chart','symbol='+sym),A('news','symbol='+sym).catch(()=>({news:[]}))]),v=c.c.slice(-90),t=c.t.slice(-90),ns=nw.news,W=340,H=170;
+  const mn=Math.min(...v,cost||1e9),mx=Math.max(...v,cost||0),X=i=>i/(v.length-1)*W,Y=y=>H-(y-mn)/(mx-mn||1)*H,up=v[v.length-1]>=v[0];
+  const pl=cost?(c.price-cost)/cost*100:null;
+  $('#sheet').innerHTML=`<div class="row"><div><b class="sym">${sym}</b> $${f(c.price)}</div><button class="btn2" onclick="$('#modal').style.display='none'">ปิด</button></div>
+  ${cost?`<div>ต้นทุน $${f(cost)} · ตอนนี้ ${pc(pl)}</div>`:''}
+  <svg viewBox="0 0 ${W} ${H}" width="100%" style="margin:10px 0"><polyline points="${v.map((y,i)=>X(i)+','+Y(y)).join(' ')}" fill="none" stroke="${up?'#16c784':'#ea3943'}" stroke-width="2"/>${cost?`<line x1="0" x2="${W}" y1="${Y(cost)}" y2="${Y(cost)}" stroke="#f5b942" stroke-dasharray="4"/><text x="4" y="${Y(cost)-4}" fill="#f5b942" font-size="10">ต้นทุน $${f(cost)}</text>`:''}</svg>
+  <div class="row mu"><span>${dt(t[0])}</span><span>ต่ำ $${f(Math.min(...v))} · สูง $${f(Math.max(...v))}</span><span>${dt(t[t.length-1])}</span></div>
+  <h4>ข่าวล่าสุด (คะแนน ${sent(ns)>=0?'+':''}${sent(ns)})</h4>`+(ns.map(n=>`<div class="n"><a href="${n.url}" target="_blank">${n.title}</a><br><small>${n.site||''} · ${n.t?dt(n.t):''}</small></div>`).join('')||'<small>ไม่มีข่าว</small>')
  }catch(e){$('#sheet').innerHTML='⚠️ '+e.message}}
 const views={
  scan(){const t=LS('scanTime');return `<button class="btn" onclick="doScan()">🔍 สแกนหุ้นมาแรง</button><div class="mu" style="margin:8px 0" id="st">${t?'อัปเดตล่าสุด '+t:'กดสแกนก่อนตลาดเปิด 20:30 น.'}</div>`+
- scan.map((x,i)=>`<div class="card" onclick="chart('${x.sym}')"><div class="row"><div><span class="mu">#${i+1}</span> <span class="sym">${x.sym}</span><br><small>เปิด $${f(x.o)} · สูง $${f(x.h)}</small></div><div style="text-align:right">$${f(x.price)}<br>${pc(x.chg)}</div><div class="score" style="${sc(x.score)}">${x.score}</div></div>
- <div class="bar"><i style="width:${x.score}%"></i></div><div style="margin-top:6px"><span class="tag">ข่าว ${x.sent>=0?'+':''}${x.sent}</span><span class="tag">ปิดก่อน $${f(x.pc)}</span>${x.sent>=2?'<span class="tag" style="color:#16c784">ข่าวดี</span>':x.sent<=-2?'<span class="tag" style="color:#ea3943">ข่าวลบ</span>':''}</div></div>`).join('')},
- async ipo(){const fm=dstr;try{const r=await fh('calendar/ipo',`from=${fm(Date.now())}&to=${fm(Date.now()+45*864e5)}`),l=r.ipoCalendar||[];return `<h3>📅 IPO ใน 45 วันข้างหน้า</h3>`+(l.length?l.map(x=>`<div class="card"><div class="row"><span class="sym">${x.symbol||'-'}</span><span class="pill">${x.date||''}</span></div><div>${x.name||''}</div><small>${x.exchange||''} · ${x.status||''} · ราคา ${x.price||'-'} · ${x.numberOfShares?f(x.numberOfShares,0)+' หุ้น':''}</small></div>`).join(''):'<div class="card mu">ไม่พบข้อมูล</div>')}catch(e){return '⚠️ '+e.message}},
+ scan.map((x,i)=>`<div class="card" onclick="chart('${x.sym}')"><div class="row"><div><span class="mu">#${i+1}</span> <span class="sym">${x.sym}</span><br><small>${(x.name||'').slice(0,26)}</small></div><div style="text-align:right">$${f(x.price)}<br>${pc(x.chg)}</div><div class="score" style="${sc(x.score)}">${x.score}</div></div>
+ <div class="bar"><i style="width:${x.score}%"></i></div><div style="margin-top:6px">${x.pre!=null?`<span class="tag" style="color:#f5b942">PRE ${x.pre>=0?'+':''}${f(x.pre)}%</span>`:''}<span class="tag">ข่าว ${x.sent>=0?'+':''}${x.sent}</span>${x.rv?`<span class="tag">Vol x${f(x.rv,1)}</span>`:''}<span class="tag">Cap ${cap(x.mcap)}</span></div>
+ ${x.news&&x.news[0]?`<div class="mu" style="margin-top:6px">📰 ${x.news[0].title}</div>`:''}</div>`).join('')},
+ async ipo(){try{const{list}=await A('ipo'),g=s=>list.filter(x=>x.status===s&&x.sym),card=x=>`<div class="card"><div class="row"><span class="sym">${x.sym}</span><span class="pill">${x.date||'-'}</span></div><div>${x.name||''}</div><small>${x.ex||''} · ราคา ${x.price||'-'} ${x.shares?'· '+x.shares+' หุ้น':''}</small></div>`;
+  const sec=(t,a)=>a.length?`<h3>${t}</h3>`+a.map(card).join(''):'';
+  return sec('📅 กำลังจะเข้าเทรด',g('upcoming'))+sec('✅ เพิ่งกำหนดราคา',g('priced').slice(0,10))+sec('🌱 ยื่นไฟลิ่งแล้ว (ต้นน้ำ)',g('filed').slice(0,12))||'<div class="card mu">ไม่พบข้อมูล</div>'}catch(e){return '⚠️ '+e.message}},
  async rank(){let h=LS('rank')||{};if(sb)try{const{data}=await sb.from('rankings').select('*').order('day',{ascending:false}).limit(300);(data||[]).forEach(r=>{(h[r.day]=h[r.day]||[]);if(!h[r.day].find(z=>z.sym===r.sym))h[r.day].push(r)})}catch(e){}
-  const days=Object.keys(h).sort().reverse();return `<h3>🏆 อันดับรายวัน</h3>`+(days.length?days.map(d=>`<div class="card"><b>${d}</b>`+h[d].sort((a,b)=>a.rank-b.rank).slice(0,10).map(r=>`<div class="row n"><span>#${r.rank} <b>${r.sym}</b></span><span>${pc(r.gap)}</span><span class="score" style="${sc(r.score)};min-width:36px;font-size:14px">${r.score}</span></div>`).join('')+`</div>`).join(''):'<div class="card mu">ยังไม่มีข้อมูล สแกนก่อนนะ</div>')},
- async port(){const p=await getPort();let q={};await Promise.all([...new Set(p.map(x=>x.sym))].map(s=>fh('quote','symbol='+s).then(r=>q[s]=r.c).catch(()=>{})));
-  let tc=0,tv=0;const rows=p.map(x=>{const pr=q[x.sym],c=x.shares*x.cost,v=pr?x.shares*pr:0;tc+=c;tv+=v;const pl=v-c;return `<div class="card"><div class="row" onclick="chart('${x.sym}',${x.cost})"><div><span class="sym">${x.sym}</span><br><small>${x.shares} หุ้น @ $${f(x.cost)}</small></div><div style="text-align:right">$${f(pr)}<br><span class="${pl>=0?'up':'dn'}">${pl>=0?'+':''}$${f(pl)} (${f(pl/c*100)}%)</span><br><small class="${pl>=0?'up':'dn'}">≈ ฿${f(pl*FX,0)}</small></div></div><button class="btn2" style="margin-top:8px" onclick="delPos('${x.id}')">ลบ</button></div>`}).join(''),pl=tv-tc;
+  const days=Object.keys(h).filter(d=>h[d].length).sort().reverse();return `<h3>🏆 อันดับรายวัน</h3>`+(days.length?days.map(d=>`<div class="card"><b>${d}</b>`+h[d].sort((a,b)=>a.rank-b.rank).slice(0,10).map(r=>`<div class="row n"><span>#${r.rank} <b>${r.sym}</b></span><span>${pc(r.gap)}</span><span class="score" style="${sc(r.score)};min-width:36px;font-size:14px">${r.score}</span></div>`).join('')+`</div>`).join(''):'<div class="card mu">ยังไม่มีข้อมูล สแกนก่อนนะ</div>')},
+ async port(){const p=await getPort();let q={};if(p.length)try{q=(await A('quote','symbols='+[...new Set(p.map(x=>x.sym))].join(','))).quotes}catch(e){}
+  let tc=0,tv=0;const rows=p.map(x=>{const pr=q[x.sym]?.price,c=x.shares*x.cost,v=pr?x.shares*pr:0;tc+=c;tv+=v;const pl=v-c;return `<div class="card"><div class="row" onclick="chart('${x.sym}',${x.cost})"><div><span class="sym">${x.sym}</span><br><small>${x.shares} หุ้น @ $${f(x.cost)}</small></div><div style="text-align:right">$${f(pr)}<br><span class="${pl>=0?'up':'dn'}">${pl>=0?'+':''}$${f(pl)} (${f(pl/c*100)}%)</span><br><small class="${pl>=0?'up':'dn'}">≈ ฿${f(pl*FX,0)}</small></div></div><button class="btn2" style="margin-top:8px" onclick="delPos('${x.id}')">ลบ</button></div>`}).join(''),pl=tv-tc;
   return `<div class="card"><small>มูลค่ารวม</small><div style="font-size:24px;font-weight:700">$${f(tv)} <small>฿${f(tv*FX,0)}</small></div><div class="${pl>=0?'up':'dn'}">กำไร/ขาดทุน ${pl>=0?'+':''}$${f(pl)} · ฿${f(pl*FX,0)} (${tc?f(pl/tc*100):'0.00'}%)</div></div>
   <div class="card"><b>เพิ่มหุ้น</b><input id="ps" placeholder="Ticker เช่น NVDA"><input id="pn" type="number" placeholder="จำนวนหุ้น"><input id="pc" type="number" step="any" placeholder="ราคาซื้อเฉลี่ย (USD)"><button class="btn" onclick="addPos()">+ เพิ่ม</button></div>`+rows},
- set(){const c=cfg();return `<div class="card"><b>Finnhub API Key</b><input id="k0" value="${c.fh||KEY}"><b>หุ้นที่ให้สแกน (คั่นด้วยจุลภาค ไม่เกิน 45 ตัว)</b><textarea id="ku">${c.uni||UNI}</textarea><b>Supabase URL (ไม่บังคับ)</b><input id="k2" value="${c.sbu||''}" placeholder="https://xxx.supabase.co"><b>Supabase anon key</b><input id="k3" value="${c.sbk||''}"><button class="btn" onclick="saveCfg()">บันทึก</button><p class="mu">ถ้าไม่ใส่ Supabase ข้อมูลจะเก็บในเครื่องนี้แทน<br>⚠️ คะแนนเป็นเพียงเครื่องมือช่วยคัดกรอง ไม่ใช่คำแนะนำลงทุน</p></div>`}};
-function saveCfg(){LS('cfg',{fh:$('#k0').value.trim(),uni:$('#ku').value.trim(),sbu:$('#k2').value.trim(),sbk:$('#k3').value.trim()});initSb();tab='scan';render()}
+ set(){const c=cfg();return `<div class="card"><b>Supabase URL (ไม่บังคับ)</b><input id="k2" value="${c.sbu||''}" placeholder="https://xxx.supabase.co"><b>Supabase anon key</b><input id="k3" value="${c.sbk||''}"><button class="btn" onclick="saveCfg()">บันทึก</button><p class="mu">ถ้าไม่ใส่ Supabase ข้อมูลจะเก็บในเครื่องนี้แทน<br>ข้อมูลตลาดมาจาก Yahoo Finance / Nasdaq ผ่าน /api/market ไม่ต้องใช้ API key<br>⚠️ คะแนนเป็นเพียงเครื่องมือช่วยคัดกรอง ไม่ใช่คำแนะนำลงทุน</p></div>`}};
+function saveCfg(){LS('cfg',{sbu:$('#k2').value.trim(),sbk:$('#k3').value.trim()});initSb();tab='scan';render()}
 const T=[['scan','📈','สแกน'],['ipo','🆕','IPO'],['rank','🏆','อันดับ'],['port','💼','พอร์ต'],['set','⚙️','ตั้งค่า']];
 async function render(){$('#nav').innerHTML=T.map(t=>`<button class="${tab===t[0]?'on':''}" onclick="tab='${t[0]}';render()"><b>${t[1]}</b>${t[2]}</button>`).join('');
  $('#app').innerHTML='โหลด…';$('#app').innerHTML=await views[tab]()}
