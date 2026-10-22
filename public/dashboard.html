@@ -1,0 +1,627 @@
+<title>Mirror Bot Console</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: a fake macOS desktop — one wide session window on the left, editor + agent radar stacked right; stacks to one column on phones.
+   Single deliberate dark look (it imitates a trading terminal at night), so no light theme. */
+:root {
+  color-scheme: dark;
+  --desk-0: #04110c;
+  --desk-1: #0a2a1d;
+  --win: #0b1612f2;
+  --win-2: #0f1d18;
+  --line: #1d3129;
+  --line-2: #284237;
+  --fg: #e6f2ec;
+  --fg-2: #9db5aa;
+  --fg-3: #5f7a6e;
+  --green: #4fe3a0;
+  --green-dim: #1f6b4c;
+  --red: #ff6b6b;
+  --amber: #f5c15c;
+  --blue: #7cc4ff;
+  --code-kw: #ff7ab6;
+  --code-str: #9be37b;
+  --code-fn: #7cc4ff;
+  --code-num: #f5c15c;
+  --code-com: #4d6a5e;
+  --sans: "Geist", ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+html, body { height: 100%; }
+body {
+  background: radial-gradient(120% 90% at 70% 110%, #1b5a3e 0%, var(--desk-1) 35%, var(--desk-0) 75%) fixed, var(--desk-0);
+  color: var(--fg); font-family: var(--sans); font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+* { box-sizing: border-box; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* menubar */
+.menubar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  display: flex; align-items: center; gap: 18px; height: 30px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  background: #06120ecc; backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+  border-bottom: 1px solid #ffffff0d; font-size: 13px; color: var(--fg);
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: #06120e; }
+.menubar b { font-weight: 600; }
+.menubar .menus { display: flex; gap: 16px; color: var(--fg-2); }
+.menubar .right { margin-left: auto; display: flex; gap: 14px; align-items: center; color: var(--fg-2); font-family: var(--mono); font-size: 12px; }
+.batt { display: inline-flex; align-items: center; gap: 6px; }
+.batt i { display: inline-block; width: 22px; height: 11px; border: 1px solid var(--fg-2); border-radius: 3px; position: relative; }
+.batt i::after { content: ""; position: absolute; inset: 1px; width: var(--b, 90%); background: var(--fg); border-radius: 1px; }
+.batt.low i::after { background: var(--red); }
+
+/* desktop grid */
+.desk {
+  display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr); gap: 14px;
+  padding-block: 16px 20px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  max-width: 1500px; margin: 0 auto;
+}
+.col { display: grid; gap: 14px; min-width: 0; align-content: start; }
+@media (max-width: 980px) { .desk { grid-template-columns: minmax(0, 1fr); } .menubar .menus { display: none; } }
+
+.win {
+  background: var(--win); border: 1px solid #ffffff12; border-radius: 12px;
+  box-shadow: 0 24px 60px -20px #000c, inset 0 1px 0 #ffffff0d; overflow: hidden; min-width: 0;
+}
+.titlebar { position: relative; display: flex; align-items: center; height: 34px; padding: 0 12px; border-bottom: 1px solid var(--line); }
+.lights { display: flex; gap: 7px; }
+.lights span { width: 11px; height: 11px; border-radius: 50%; background: #3a4a43; }
+.win.main .lights span:nth-child(1) { background: #ff5f57; }
+.win.main .lights span:nth-child(2) { background: #febc2e; }
+.win.main .lights span:nth-child(3) { background: #28c840; }
+.titlebar .t { position: absolute; left: 50%; transform: translateX(-50%); color: var(--fg-2); font-size: 12px; font-weight: 500; white-space: nowrap; }
+
+/* session header */
+.head { display: flex; align-items: center; gap: 12px; padding: 16px 18px 6px; flex-wrap: wrap; }
+.head .name { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+.head .sub { font-family: var(--mono); font-size: 10px; color: var(--fg-3); letter-spacing: 0.08em; text-transform: uppercase; margin-top: 2px; }
+.head .meta { margin-left: auto; display: flex; align-items: center; gap: 12px; font-family: var(--mono); font-size: 11px; color: var(--fg-3); }
+.pill { display: inline-flex; align-items: center; gap: 7px; padding: 4px 12px 4px 10px; border-radius: 999px; border: 1px solid var(--green-dim); background: #4fe3a01a; color: var(--green); font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; }
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 10px currentColor; animation: pulse 1.6s infinite; }
+.pill.demo { color: var(--amber); border-color: #6b5420; background: #f5c15c14; }
+.pill.paper { color: var(--blue); border-color: #2b5677; background: #7cc4ff14; }
+.pill.done::before { animation: none; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 10px 18px; }
+@media (max-width: 640px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.stat { background: var(--win-2); border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; min-width: 0; }
+.stat label { display: block; font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.1em; color: var(--fg-3); text-transform: uppercase; }
+.stat .v { font-family: var(--mono); font-size: clamp(18px, 2.2vw, 26px); font-weight: 600; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat .v.pos { color: var(--green); } .stat .v.neg { color: var(--red); }
+.stat small { display: block; font-family: var(--mono); font-size: 10px; color: var(--fg-3); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.panel { margin: 0 18px 12px; background: var(--win-2); border: 1px solid var(--line); border-radius: 9px; min-width: 0; }
+.panel .ph { display: flex; justify-content: space-between; align-items: center; padding: 9px 12px 0; font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg-2); gap: 8px; }
+.panel .ph span:last-child { color: var(--fg-3); text-transform: none; letter-spacing: 0; }
+.chart { position: relative; height: clamp(220px, 30vw, 330px); }
+.chart canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+.lower { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin: 0 18px 16px; }
+.lower .panel { margin: 0; }
+@media (max-width: 760px) { .lower { grid-template-columns: minmax(0, 1fr); } }
+.log { height: 250px; overflow: auto; padding: 8px 12px 10px; font-family: var(--mono); font-size: 11.5px; line-height: 1.75; color: var(--fg-2); }
+.log div { white-space: nowrap; }
+.log .ts { color: var(--fg-3); }
+.log .k-signal .x { color: var(--code-fn); } .log .k-enter .x { color: var(--fg); }
+.log .k-fill .x { color: var(--green); } .log .k-exit .x { color: var(--fg); }
+.log .k-skip .x { color: var(--fg-3); } .log .k-error .x { color: var(--red); } .log .k-info .x { color: var(--amber); }
+.log .up { color: var(--green); } .log .dn { color: var(--red); }
+.cursor { display: inline-block; width: 7px; height: 13px; background: var(--green); vertical-align: -2px; animation: pulse 1s steps(1) infinite; }
+
+.feed { height: 250px; overflow: auto; padding: 6px 8px 8px; }
+.fi { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 6px; border-radius: 7px; }
+.fi:first-child { background: #4fe3a00d; }
+.fi .tk { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-family: var(--mono); font-size: 10px; font-weight: 700; color: #04110c; }
+.fi .a { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fi .b { font-family: var(--mono); font-size: 10px; color: var(--fg-3); }
+.fi .r { font-family: var(--mono); font-size: 11.5px; font-weight: 600; }
+.fi .r.copied { color: var(--fg-3); font-size: 10px; letter-spacing: 0.08em; }
+.fi .r.pos { color: var(--green); } .fi .r.neg { color: var(--red); }
+.empty { color: var(--fg-3); font-family: var(--mono); font-size: 11px; padding: 14px 6px; }
+
+/* editor */
+.tabs { display: flex; gap: 18px; padding: 8px 14px 0; font-family: var(--mono); font-size: 11.5px; color: var(--fg-3); border-bottom: 1px solid var(--line); overflow-x: auto; }
+.tabs span { padding-bottom: 8px; white-space: nowrap; }
+.tabs span.on { color: var(--fg); border-bottom: 1.5px solid var(--green); }
+.code { overflow-x: auto; padding: 10px 0 12px; font-family: var(--mono); font-size: 11.5px; line-height: 1.7; min-height: 290px; }
+.code .ln { display: flex; white-space: pre; padding-right: 14px; }
+.code .ln.hl { background: #ffffff08; }
+.code .n { width: 34px; flex: none; text-align: right; padding-right: 14px; color: #34493f; user-select: none; }
+.kw { color: var(--code-kw); } .st { color: var(--code-str); } .fn { color: var(--code-fn); } .nu { color: var(--code-num); } .cm { color: var(--code-com); font-style: italic; }
+.term { border-top: 1px solid var(--line); padding: 10px 14px 12px; font-family: var(--mono); font-size: 11.5px; color: var(--fg-2); line-height: 1.7; background: #060e0b; }
+.term .lbl { font-size: 9.5px; letter-spacing: 0.12em; color: var(--fg-3); }
+.term .ok { color: var(--green); }
+
+/* agents radar */
+.radar { position: relative; height: 380px; background: radial-gradient(60% 60% at 50% 48%, #12324a66, transparent 70%); }
+.radar canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.radar .sig { position: absolute; left: 14px; top: 10px; font-family: var(--mono); font-size: 10.5px; color: var(--fg-3); }
+.node { position: absolute; transform: translate(-50%, -50%); display: grid; justify-items: center; gap: 4px; text-align: center; }
+.node .ring { --p: 40; width: 52px; height: 52px; border-radius: 50%; padding: 3px; background: conic-gradient(var(--blue) calc(var(--p) * 1%), #ffffff14 0); box-shadow: 0 0 22px #7cc4ff33; }
+.node .face { width: 100%; height: 100%; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #d9f0ff, #8fb9d6 70%); display: grid; place-items: center; }
+.node .face svg { width: 60%; height: 60%; }
+.node b { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; }
+.node small { font-family: var(--mono); font-size: 9.5px; color: var(--fg-3); max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node.veto .ring { background: conic-gradient(var(--red) calc(var(--p) * 1%), #ffffff14 0); box-shadow: 0 0 22px #ff6b6b44; }
+.node.core .ring { width: 92px; height: 92px; padding: 4px; background: conic-gradient(var(--green) calc(var(--p) * 1%), #ffffff1a 0); box-shadow: 0 0 40px #4fe3a055, 0 0 0 10px #ffffff06; }
+.node.core .face { background: radial-gradient(circle at 35% 30%, #ffffff, #cfe7dc 75%); }
+.node.core b { font-size: 12px; }
+.consensus { display: flex; align-items: center; gap: 10px; margin: 0 12px 12px; padding: 9px 12px; border: 1px solid var(--line-2); border-radius: 9px; background: #0a1713; font-family: var(--mono); font-size: 11.5px; }
+.consensus .sym { font-weight: 600; }
+.consensus .dec { margin-left: auto; color: var(--fg-3); }
+.consensus .dec.enter { color: var(--green); } .consensus .dec.skip { color: var(--amber); }
+
+/* controls */
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 18px 16px; font-family: var(--mono); font-size: 11px; color: var(--fg-3); }
+.controls button { font: inherit; color: var(--fg-2); background: var(--win-2); border: 1px solid var(--line-2); border-radius: 7px; padding: 5px 10px; cursor: pointer; }
+.controls button:hover { color: var(--fg); border-color: var(--green-dim); }
+.controls button.on { color: var(--green); border-color: var(--green-dim); }
+.controls button.danger { color: var(--red); border-color: #5a2626; }
+.controls button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.controls .note { margin-left: auto; }
+.banner { margin: 0 18px 10px; padding: 8px 12px; border-radius: 8px; border: 1px dashed #6b5420; color: var(--amber); font-family: var(--mono); font-size: 11px; line-height: 1.5; }
+.login { margin: 0 18px 12px; padding: 14px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--win-2); display: grid; gap: 10px; }
+.login h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.login p { margin: 0; color: var(--fg-2); font-size: 12.5px; line-height: 1.5; }
+.login form { display: flex; gap: 8px; flex-wrap: wrap; }
+.login input { flex: 1 1 220px; min-width: 0; font: 13px var(--mono); color: var(--fg); background: #060e0b; border: 1px solid var(--line-2); border-radius: 7px; padding: 8px 10px; }
+.login input:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
+.login button { font: 600 12px var(--mono); color: #04110c; background: var(--green); border: 0; border-radius: 7px; padding: 8px 14px; cursor: pointer; }
+.login button:disabled { opacity: 0.5; cursor: default; }
+.login .msg { font-family: var(--mono); font-size: 11.5px; color: var(--amber); }
+.pill.off { color: var(--red); border-color: #5a2626; background: #ff6b6b14; }
+@media (prefers-reduced-motion: reduce) { .pill::before, .cursor { animation: none; } }
+</style>
+
+<header class="menubar">
+  <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><use href="#mascot"/></svg>
+  <b>Mirror Bot</b>
+  <nav class="menus"><span>File</span><span>Edit</span><span>View</span><span>Agents</span><span>Window</span><span>Help</span></nav>
+  <div class="right"><span id="mbLag">212ms</span><span class="batt" id="batt"><span id="battPct">92%</span><i></i></span><span id="clock">—</span></div>
+</header>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="mascot" viewBox="0 0 24 24">
+    <rect x="2" y="3" width="20" height="18" rx="7" fill="#e6f2ec"/>
+    <rect x="5" y="8.5" width="14" height="6" rx="3" fill="#0b1612"/>
+    <circle cx="9" cy="11.5" r="1.6" fill="#4fe3a0"/><circle cx="15" cy="11.5" r="1.6" fill="#4fe3a0"/>
+  </symbol>
+  <symbol id="agentface" viewBox="0 0 24 24">
+    <rect x="3" y="7" width="18" height="10" rx="5" fill="#0c2233"/>
+    <circle cx="9" cy="12" r="2" fill="#bfe3ff"/><circle cx="15" cy="12" r="2" fill="#bfe3ff"/>
+  </symbol>
+</svg>
+
+<main class="desk">
+  <section class="win main" aria-label="Session">
+    <div class="titlebar"><div class="lights"><span></span><span></span><span></span></div><div class="t" id="winTitle">Mirror Bot — 24h session</div></div>
+    <div class="head">
+      <svg width="40" height="40" aria-hidden="true"><use href="#mascot"/></svg>
+      <div><div class="name">Mirror Bot</div><div class="sub">Dex memes · copy trading · 6 agents</div></div>
+      <div class="meta"><span id="sessionRange" class="num">24H</span><span class="pill demo" id="modePill">DEMO</span></div>
+    </div>
+    <div class="banner" id="banner">Demo mode: everything on this page is simulated, not real trades. Run the bot on your own computer and open http://localhost:8787 to see live or paper-trading data here.</div>
+    <div class="login" id="login" hidden>
+      <h2>Sign in to see your bot</h2>
+      <p>We'll email you a login link. Only emails listed in the dashboard_owners table can see data.</p>
+      <form id="loginForm"><input id="loginEmail" type="email" required placeholder="you@email.com" autocomplete="email"><button id="loginBtn" type="submit">Send login link</button></form>
+      <div class="msg" id="loginMsg"></div>
+    </div>
+    <div class="stats">
+      <div class="stat"><label>Balance</label><div class="v num" id="sBal">—</div><small id="sBalSub">—</small></div>
+      <div class="stat"><label>Total P&amp;L</label><div class="v num" id="sPnl">—</div><small id="sPnlSub">—</small></div>
+      <div class="stat"><label>Win rate</label><div class="v num" id="sWr">—</div><small id="sWrSub">—</small></div>
+      <div class="stat"><label>Copies</label><div class="v num" id="sCp">—</div><small id="sCpSub">—</small></div>
+    </div>
+    <div class="panel">
+      <div class="ph"><span>Equity curve</span><span id="eqNote">1m · smoothed</span></div>
+      <div class="chart"><canvas id="eq" aria-label="Equity curve"></canvas></div>
+    </div>
+    <div class="lower">
+      <div class="panel"><div class="ph"><span>Entry code</span><span>copybot/engine.ts</span></div><div class="log" id="log" aria-live="polite"></div></div>
+      <div class="panel"><div class="ph"><span>Copy feed</span><span id="feedSrc">leaders</span></div><div class="feed" id="feed"></div></div>
+    </div>
+    <div class="controls" id="controls"></div>
+  </section>
+
+  <div class="col">
+    <section class="win" aria-label="Copy engine source">
+      <div class="titlebar"><div class="lights"><span></span><span></span><span></span></div><div class="t">copybot — copy-engine</div></div>
+      <div class="tabs"><span class="on">index.ts</span><span>wallets.json</span><span>.env</span></div>
+      <div class="code" id="code"></div>
+      <div class="term"><div class="lbl">TERMINAL</div><div id="term1">$ npm start</div><div id="term2" class="num">waiting…</div></div>
+    </section>
+    <section class="win" aria-label="Agents">
+      <div class="titlebar"><div class="lights"><span></span><span></span><span></span></div><div class="t">Mirror · agents</div></div>
+      <div class="radar" id="radar"><canvas id="radarCv"></canvas><div class="sig num" id="sigCount">signals 0</div></div>
+      <div class="consensus"><span>consensus</span><span class="sym" id="cSym">—</span><span class="dec num" id="cDec">waiting for a signal</span></div>
+    </section>
+  </div>
+</main>
+
+<script>
+(() => {
+"use strict";
+const $ = (id) => document.getElementById(id);
+const AGENTS = ["SCAN", "RISK", "WHALE", "SNIPER", "NARRATIVE", "EXIT"];
+const fmtUsd = (v, sign) => (sign && v >= 0 ? "+" : v < 0 ? "−" : "") + "$" + Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const hhmm = (t) => { const d = new Date(t); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
+const hue = (s) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/* ---------------- code editor (types itself in) ---------------- */
+const SRC = [
+  ['<span class="kw">import</span> { Watcher } <span class="kw">from</span> <span class="st">"./watcher.ts"</span>;'],
+  ['<span class="kw">import</span> { consensus } <span class="kw">from</span> <span class="st">"./agents.ts"</span>;'],
+  ['<span class="kw">import</span> { swap } <span class="kw">from</span> <span class="st">"./jupiter.ts"</span>;  <span class="cm">// Swap API v2</span>'],
+  [''],
+  ['<span class="kw">const</span> leaders = <span class="fn">loadLeaders</span>();  <span class="cm">// wallets.json</span>'],
+  ['<span class="kw">const</span> watch = <span class="kw">new</span> <span class="fn">Watcher</span>(leaders);'],
+  ['watch.onTrade = <span class="kw">async</span> (t) =&gt; {'],
+  ['  <span class="kw">const</span> { score, vetoed } = <span class="kw">await</span> <span class="fn">consensus</span>(<span class="fn">ctx</span>(t)); <span class="cm">// 6 agents vote</span>', true],
+  ['  <span class="kw">if</span> (vetoed || score &lt; <span class="nu">0.75</span>) <span class="kw">return</span> <span class="fn">skip</span>(t);'],
+  ['  <span class="kw">const</span> size = Math.<span class="fn">min</span>(equity * <span class="nu">0.12</span>, <span class="nu">0.25</span>);'],
+  ['  <span class="kw">await</span> <span class="fn">swap</span>(kp, SOL, t.mint, size, { slippageBps: <span class="nu">150</span> });'],
+  ['};'],
+  ['<span class="fn">monitor</span>({ tp: <span class="nu">0.35</span>, sl: <span class="nu">0.12</span>, trail: <span class="nu">0.10</span> });'],
+  ['watch.<span class="fn">start</span>();'],
+  [''],
+];
+let codeShown = 0;
+function renderCode() {
+  $("code").innerHTML = SRC.map((l, i) => `<div class="ln${l[1] ? " hl" : ""}"><span class="n">${i + 1}</span><span>${i < codeShown ? l[0] : ""}</span></div>`).join("");
+}
+renderCode();
+const codeTimer = setInterval(() => { codeShown++; renderCode(); if (codeShown >= SRC.length) clearInterval(codeTimer); }, reduced ? 1 : 260);
+
+/* ---------------- rendering a snapshot ---------------- */
+let snap = null;
+let mode = "demo";
+
+function render(s) {
+  snap = s;
+  const usd = s.solUsd || 0;
+  const eqUsd = s.equitySol * usd, startUsd = s.startSol * usd;
+  const pnl = eqUsd - startUsd;
+  $("sBal").textContent = fmtUsd(eqUsd);
+  $("sBalSub").textContent = `started at ${fmtUsd(startUsd)} · ${s.equitySol.toFixed(3)} SOL`;
+  $("sPnl").textContent = fmtUsd(pnl, true);
+  $("sPnl").className = "v num " + (pnl >= 0 ? "pos" : "neg");
+  $("sPnlSub").textContent = (startUsd ? (pnl / startUsd * 100).toFixed(1) : "0") + "% · " + (s.positions?.length || 0) + " open";
+  const n = s.wins + s.losses;
+  $("sWr").textContent = n ? Math.round(s.wins / n * 100) + "%" : "—";
+  $("sWrSub").textContent = `${s.wins}W ${s.losses}L`;
+  $("sCp").textContent = s.copies;
+  $("sCpSub").textContent = `via ${s.leaders ?? 6} wallets · ${s.skipped} skipped`;
+  $("sigCount").textContent = "signals " + s.signals.toLocaleString("en-US");
+  $("term2").innerHTML = `<span class="ok">✓</span> ${s.leaders ?? 6} wallets synced · mirrored ${s.copies} trades · skipped ${s.skipped} · pnl ${fmtUsd(pnl, true)}`;
+  $("term1").textContent = mode === "demo" ? "$ npm start  # demo simulation" : `$ npm start  # MODE=${s.mode}`;
+
+  const logEl = $("log");
+  const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 30;
+  logEl.innerHTML = s.log.slice(-80).map((l) => {
+    let t = esc(l.text).replace(/(\+\$[\d,.]+)/g, '<span class="up">$1</span>').replace(/(−\$[\d,.]+)/g, '<span class="dn">$1</span>');
+    return `<div class="k-${l.kind}"><span class="ts">[${hhmm(l.t)}]</span> <span class="x">${t}</span></div>`;
+  }).join("") + '<div><span class="cursor"></span></div>';
+  if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+
+  $("feed").innerHTML = s.feed.length ? s.feed.slice(0, 30).map((f) => {
+    const sym = f.symbol.replace("$", "");
+    const ic = `<span class="tk" style="background:hsl(${hue(sym)} 70% 62%)">${esc(sym[0] || "?")}</span>`;
+    if (f.kind === "exit") {
+      const cls = (f.pnlUsd ?? 0) >= 0 ? "pos" : "neg";
+      return `<div class="fi">${ic}<div style="min-width:0"><div class="a">${esc(f.leader)} sold ${esc(f.symbol)} · exit copied</div><div class="b">${f.sol.toFixed(2)} SOL · ${hhmm(f.t)}</div></div><div class="r ${cls}">${fmtUsd(f.pnlUsd ?? 0, true)}</div></div>`;
+    }
+    return `<div class="fi">${ic}<div style="min-width:0"><div class="a">mirror ${esc(f.leader)} → BUY ${esc(f.symbol)}</div><div class="b">${f.sol.toFixed(2)} SOL · ${hhmm(f.t)}</div></div><div class="r copied">COPIED</div></div>`;
+  }).join("") : '<div class="empty">No copied trades yet. Waiting for a leader wallet to buy.</div>';
+
+  if (s.consensus) {
+    $("cSym").textContent = s.consensus.symbol;
+    const d = $("cDec");
+    d.textContent = `${s.consensus.score.toFixed(2)} → ${s.consensus.decision === "ENTER" ? "ENTERED" : "SKIPPED"}`;
+    d.className = "dec num " + (s.consensus.decision === "ENTER" ? "enter" : "skip");
+  }
+  for (const a of AGENTS) {
+    const el = nodes[a]; const v = s.agents[a] || { score: 0, note: "idle" };
+    el.querySelector(".ring").style.setProperty("--p", Math.round(v.score * 100));
+    el.querySelector("small").textContent = v.note;
+    el.classList.toggle("veto", v.score === 0 && v.note !== "idle");
+  }
+  nodes.CORE.querySelector(".ring").style.setProperty("--p", Math.round((s.consensus?.score ?? 0) * 100));
+  drawEquity();
+}
+
+/* ---------------- equity chart (canvas) ---------------- */
+const eqCv = $("eq");
+function drawEquity() {
+  if (!snap) return;
+  const r = eqCv.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio || 1);
+  eqCv.width = r.width * dpr; eqCv.height = r.height * dpr;
+  const g = eqCv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const W = r.width, H = r.height, padL = 14, padR = 14, padT = 26, padB = 26;
+  const pts = snap.equity;
+  g.clearRect(0, 0, W, H);
+  if (pts.length < 2) { g.fillStyle = "#5f7a6e"; g.font = "11px 'Geist Mono', monospace"; g.fillText("collecting equity points…", padL + 6, H / 2); return; }
+  const t0 = pts[0].t, t1 = pts[pts.length - 1].t;
+  let lo = Infinity, hi = -Infinity; for (const p of pts) { lo = Math.min(lo, p.usd); hi = Math.max(hi, p.usd); }
+  const span = hi - lo || 1; lo -= span * 0.08; hi += span * 0.18;
+  const X = (t) => padL + (W - padL - padR) * ((t - t0) / (t1 - t0 || 1));
+  const Y = (v) => padT + (H - padT - padB) * (1 - (v - lo) / (hi - lo));
+  // grid
+  g.strokeStyle = "#ffffff0a"; g.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) { const y = padT + (H - padT - padB) * i / 4; g.beginPath(); g.moveTo(padL, y); g.lineTo(W - padR, y); g.stroke(); }
+  // area
+  const grad = g.createLinearGradient(0, padT, 0, H - padB);
+  grad.addColorStop(0, "#4fe3a055"); grad.addColorStop(1, "#4fe3a000");
+  g.beginPath(); g.moveTo(X(pts[0].t), Y(pts[0].usd));
+  for (const p of pts) g.lineTo(X(p.t), Y(p.usd));
+  g.lineTo(X(t1), H - padB); g.lineTo(X(t0), H - padB); g.closePath(); g.fillStyle = grad; g.fill();
+  g.beginPath(); for (let i = 0; i < pts.length; i++) { const p = pts[i]; i ? g.lineTo(X(p.t), Y(p.usd)) : g.moveTo(X(p.t), Y(p.usd)); }
+  g.strokeStyle = "#7af0bb"; g.lineWidth = 2; g.lineJoin = "round"; g.stroke();
+  // axis labels (real values)
+  g.fillStyle = "#5f7a6e"; g.font = "10.5px 'Geist Mono', monospace";
+  g.fillText("$" + Math.round(hi - span * 0.18 + span * 0).toLocaleString("en-US"), padL + 4, padT - 10);
+  g.fillText("$" + Math.round(lo + span * 0.08).toLocaleString("en-US"), padL + 4, H - 8);
+  // trade markers: last 4, labels kept apart vertically
+  const marks = snap.markers.filter((m) => m.t >= t0).slice(-4);
+  let lastBox = null;
+  g.font = "600 11px 'Geist Mono', monospace";
+  for (let i = marks.length - 1; i >= 0; i--) {
+    const m = marks[i]; const x = X(m.t), y = Y(m.usd);
+    g.beginPath(); g.arc(x, y, 3.5, 0, 7); g.fillStyle = m.win ? "#f5c15c" : "#ff6b6b"; g.fill();
+    const tw = g.measureText(m.label).width + 18; let bx = Math.min(W - padR - tw, Math.max(padL, x - tw - 10)); let by = y - 30;
+    if (lastBox && Math.abs(by - lastBox) < 26) by = lastBox + 26;
+    by = Math.max(4, Math.min(H - padB - 22, by)); lastBox = by;
+    g.strokeStyle = "#ffffff22"; g.beginPath(); g.moveTo(x, y); g.lineTo(bx + tw, by + 11); g.stroke();
+    roundRect(g, bx, by, tw, 22, 11); g.fillStyle = "#0f1d18ee"; g.fill(); g.strokeStyle = "#284237"; g.stroke();
+    g.fillStyle = m.win ? "#e6f2ec" : "#ff9b9b"; g.fillText(m.label, bx + 9, by + 15);
+  }
+  // endpoint
+  const last = pts[pts.length - 1]; const ex = X(last.t), ey = Y(last.usd);
+  g.beginPath(); g.arc(ex, ey, 4.5, 0, 7); g.fillStyle = "#4fe3a0"; g.fill();
+  g.beginPath(); g.arc(ex, ey, 9, 0, 7); g.fillStyle = "#4fe3a033"; g.fill();
+  const lbl = fmtUsd(last.usd); g.font = "600 13px 'Geist Mono', monospace";
+  const lw = g.measureText(lbl).width + 20; const lx = Math.max(padL, Math.min(W - padR - lw, ex - lw / 2 - 30)); const ly = Math.min(H - padB - 28, ey + 12);
+  roundRect(g, lx, ly, lw, 26, 6); g.fillStyle = "#0b1612"; g.fill(); g.strokeStyle = "#4fe3a0aa"; g.stroke();
+  g.fillStyle = "#4fe3a0"; g.fillText(lbl, lx + 10, ly + 17.5);
+}
+function roundRect(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
+addEventListener("resize", () => { drawEquity(); layoutRadar(); });
+
+/* ---------------- agent radar ---------------- */
+const radar = $("radar"), rCv = $("radarCv");
+const nodes = {};
+function mkNode(name, core) {
+  const el = document.createElement("div"); el.className = "node" + (core ? " core" : "");
+  el.innerHTML = `<div class="ring" style="--p:${core ? 0 : 30}"><div class="face"><svg aria-hidden="true"><use href="#${core ? "mascot" : "agentface"}"/></svg></div></div><b>${name}</b><small>${core ? "" : "idle"}</small>`;
+  radar.appendChild(el); return el;
+}
+for (const a of AGENTS) nodes[a] = mkNode(a, false);
+nodes.CORE = mkNode("MIRROR", true);
+const POS = { SCAN: [0.2, 0.2], RISK: [0.8, 0.2], WHALE: [0.17, 0.5], SNIPER: [0.83, 0.5], NARRATIVE: [0.2, 0.8], EXIT: [0.8, 0.8], CORE: [0.5, 0.48] };
+function layoutRadar() {
+  const r = radar.getBoundingClientRect();
+  for (const k in nodes) { nodes[k].style.left = POS[k][0] * r.width + "px"; nodes[k].style.top = POS[k][1] * r.height + "px"; }
+}
+layoutRadar();
+const particles = [];
+function emit(from) { particles.push({ from, p: 0, v: 0.012 + Math.random() * 0.01 }); }
+function radarLoop() {
+  const r = radar.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio || 1);
+  if (rCv.width !== Math.round(r.width * dpr)) { rCv.width = r.width * dpr; rCv.height = r.height * dpr; }
+  const g = rCv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, r.width, r.height);
+  const cx = POS.CORE[0] * r.width, cy = POS.CORE[1] * r.height;
+  g.strokeStyle = "#7cc4ff14"; g.lineWidth = 1;
+  for (const a of AGENTS) { g.beginPath(); g.moveTo(POS[a][0] * r.width, POS[a][1] * r.height); g.lineTo(cx, cy); g.stroke(); }
+  for (let ring = 1; ring <= 3; ring++) { g.beginPath(); g.arc(cx, cy, ring * 52, 0, 7); g.strokeStyle = "#ffffff07"; g.stroke(); }
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const q = particles[i]; q.p += q.v; if (q.p >= 1) { particles.splice(i, 1); continue; }
+    const fx = POS[q.from][0] * r.width, fy = POS[q.from][1] * r.height;
+    const x = fx + (cx - fx) * q.p, y = fy + (cy - fy) * q.p;
+    for (let k = 0; k < 6; k++) { const pp = Math.max(0, q.p - k * 0.012); g.beginPath(); g.arc(fx + (cx - fx) * pp, fy + (cy - fy) * pp, 2.4 - k * 0.3, 0, 7); g.fillStyle = `rgba(150,215,255,${0.9 - k * 0.15})`; g.fill(); }
+  }
+  if (!reduced && Math.random() < 0.05) emit(AGENTS[(Math.random() * 6) | 0]);
+  requestAnimationFrame(radarLoop);
+}
+requestAnimationFrame(radarLoop);
+
+/* ---------------- menubar clock + battery ---------------- */
+function tickClock(now, batt) {
+  const d = new Date(now);
+  $("clock").textContent = d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }) + " " + hhmm(now);
+  const b = Math.max(3, Math.round(batt));
+  $("battPct").textContent = b + "%"; $("batt").style.setProperty("--b", b + "%"); $("batt").classList.toggle("low", b <= 10);
+}
+
+/* ---------------- mode: live (served by the bot on localhost) or demo ---------------- */
+const isLocal = ["localhost", "127.0.0.1"].includes(location.hostname);
+function setMode(m, s) {
+  mode = m;
+  const pill = $("modePill");
+  pill.className = "pill " + (m === "demo" ? "demo" : s?.mode === "paper" ? "paper" : "");
+  pill.textContent = m === "demo" ? "DEMO" : s?.mode === "paper" ? "PAPER" : "LIVE";
+  $("banner").hidden = m !== "demo";
+}
+
+function liveControls() {
+  const c = $("controls");
+  c.innerHTML = `<button id="killBtn" class="danger" type="button">Close all positions and stop</button><span class="note" id="ctlNote">connected to your bot</span>`;
+  let armed = false;
+  $("killBtn").onclick = async () => {
+    if (!armed) { armed = true; $("killBtn").textContent = "Click again to confirm"; setTimeout(() => { armed = false; $("killBtn").textContent = "Close all positions and stop"; }, 4000); return; }
+    $("killBtn").disabled = true; $("ctlNote").textContent = "sending stop…";
+    try { await fetch("/kill", { method: "POST" }); $("ctlNote").textContent = "stop sent: selling all positions, no new entries"; } catch { $("ctlNote").textContent = "could not reach the bot"; }
+  };
+}
+
+const SB = window.MIRROR_SUPABASE;
+if (SB && window.supabase) {
+  startSupabase();
+} else if (isLocal) {
+  setMode("live");
+  liveControls();
+  const es = new EventSource("/events");
+  es.onmessage = (e) => { const s = JSON.parse(e.data); setMode("live", s); render(s); tickClock(Date.now(), 92); };
+  es.onerror = () => { $("ctlNote") && ($("ctlNote").textContent = "connection lost, retrying…"); };
+  setInterval(() => tickClock(Date.now(), 92), 15000);
+} else {
+  startDemo();
+}
+
+/* ---------------- Supabase mode (hosted on Vercel) ---------------- */
+async function startSupabase() {
+  const botId = SB.botId || "main";
+  const client = window.supabase.createClient(SB.url, SB.anonKey);
+  setMode("live"); $("banner").hidden = true;
+  const pill = $("modePill");
+  let lastUpdate = 0, loading = false;
+
+  async function load() {
+    if (loading) return; loading = true;
+    try {
+      const { data, error } = await client.from("bot_state").select("snapshot, updated_at").eq("id", botId).maybeSingle();
+      if (error) throw error;
+      if (!data) { $("ctlNote").textContent = "no data yet: is the bot running with SUPABASE_URL set?"; return; }
+      lastUpdate = Date.parse(data.updated_at);
+      setMode("live", data.snapshot); render(data.snapshot); freshness();
+    } catch (e) { $("ctlNote").textContent = "read failed: " + (e.message || e); }
+    finally { loading = false; }
+  }
+  function freshness() {
+    const age = (Date.now() - lastUpdate) / 1000;
+    tickClock(Date.now(), 92);
+    if (!lastUpdate) return;
+    if (age > 60) { pill.className = "pill off"; pill.textContent = "OFFLINE"; }
+    $("ctlNote").textContent = age > 60 ? `bot offline · last update ${Math.round(age / 60)} min ago` : `updated ${Math.max(0, Math.round(age))}s ago`;
+  }
+  async function send(cmd) {
+    const { error } = await client.from("bot_commands").insert({ bot_id: botId, cmd });
+    $("ctlNote").textContent = error ? "command failed: " + error.message : `${cmd} sent · the bot picks it up within 5s`;
+  }
+  function controls(email) {
+    const c = $("controls");
+    c.innerHTML = `<button id="killBtn" class="danger" type="button">Close all positions and stop</button><button id="resumeBtn" type="button">Resume entries</button><button id="outBtn" type="button">Sign out</button><span class="note"><span id="ctlNote">connecting…</span> · ${esc(email)}</span>`;
+    let armed = false;
+    $("killBtn").onclick = () => {
+      if (!armed) { armed = true; $("killBtn").textContent = "Click again to confirm"; setTimeout(() => { armed = false; $("killBtn").textContent = "Close all positions and stop"; }, 4000); return; }
+      armed = false; $("killBtn").textContent = "Close all positions and stop"; send("kill");
+    };
+    $("resumeBtn").onclick = () => send("resume");
+    $("outBtn").onclick = async () => { await client.auth.signOut(); location.reload(); };
+  }
+  function showLogin() {
+    $("login").hidden = false;
+    pill.className = "pill off"; pill.textContent = "LOCKED";
+    $("controls").innerHTML = '<span class="note" id="ctlNote">signed out</span>';
+    $("loginForm").onsubmit = async (e) => {
+      e.preventDefault();
+      $("loginBtn").disabled = true; $("loginMsg").textContent = "sending…";
+      const { error } = await client.auth.signInWithOtp({ email: $("loginEmail").value.trim(), options: { emailRedirectTo: location.origin + location.pathname, shouldCreateUser: true } });
+      $("loginBtn").disabled = false;
+      $("loginMsg").textContent = error ? "Could not send: " + error.message : "Check your inbox and open the link on this device.";
+    };
+  }
+
+  const { data: { session } } = await client.auth.getSession();
+  if (!session) { showLogin(); return; }
+  controls(session.user.email || "");
+  await load();
+  client.channel("bot_state_" + botId)
+    .on("postgres_changes", { event: "*", schema: "public", table: "bot_state", filter: "id=eq." + botId }, () => load())
+    .subscribe();
+  setInterval(load, 20000);      // fallback if realtime drops
+  setInterval(freshness, 5000);
+}
+
+/* ---------------- demo simulation (clearly fake) ---------------- */
+function startDemo() {
+  setMode("demo");
+  const LEADERS = ["leo", "Oura456", "BtheBezel", "kmac.sol", "Ansem-ish", "wiz_ape"];
+  const SYL = ["STONK", "PAID", "GIGA", "FROG", "BONK", "CHAD", "MOON", "PEPE", "DOGE", "CAT", "BROKER", "TEV", "WIF", "GOAT", "SOL", "APE"];
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const pick = (a) => a[(Math.random() * a.length) | 0];
+  const SOL_USD = 150;
+  let simT = Date.now() - 0; const t0 = simT;
+  const S = { mode: "demo", startSol: 0.8333, cashSol: 0.8333, equitySol: 0.8333, solUsd: SOL_USD, wins: 0, losses: 0, copies: 0, skipped: 0, signals: 0,
+    equity: [{ t: simT, usd: 0.8333 * SOL_USD }], markers: [], log: [], feed: [], agents: {}, consensus: null, positions: [], leaders: 6 };
+  for (const a of AGENTS) S.agents[a] = { score: 0, note: "idle" };
+  const log = (kind, text) => { S.log.push({ t: simT, kind, text }); if (S.log.length > 200) S.log.shift(); };
+  log("info", "demo · simulated wallets, prices and fills");
+  let speed = 1; // sim minutes per tick
+  const ctl = $("controls");
+  ctl.innerHTML = `<span>speed</span><button type="button" data-s="1" class="on">1×</button><button type="button" data-s="4">4×</button><button type="button" data-s="12">12×</button><button type="button" id="resetBtn">Restart demo</button><span class="note">simulated · real bot: npm start</span>`;
+  ctl.querySelectorAll("[data-s]").forEach((b) => b.onclick = () => { speed = +b.dataset.s; ctl.querySelectorAll("[data-s]").forEach((x) => x.classList.toggle("on", x === b)); });
+  $("resetBtn").onclick = () => location.reload();
+
+  function signal() {
+    S.signals += (Math.random() * 40) | 0;
+    const leader = pick(LEADERS); const sym = "$" + pick(SYL) + (Math.random() < 0.5 ? pick(SYL) : "");
+    const notes = {
+      SCAN: () => { const liq = rnd(4, 300); return [liq < 15 ? 0 : Math.min(1, 0.4 + liq / 400), liq < 15 ? `liq $${liq.toFixed(0)}k too thin` : `liq $${liq.toFixed(0)}k · buys ${(rnd(45, 80)) | 0}%`]; },
+      RISK: () => { const r = Math.random(); return r < 0.15 ? [0, pick(["mint authority still enabled", "top10 hold 62%", "rugcheck: LP unlocked"])] : [rnd(0.55, 0.95), `top10 ${(rnd(12, 40)) | 0}% · ${(rnd(0, 3)) | 0} warns`]; },
+      WHALE: () => { const sol = rnd(0.1, 8); return sol < 0.3 ? [0, `leader buy ${sol.toFixed(2)} SOL too small`] : [rnd(0.55, 0.95), `${leader} wr ${(rnd(48, 74)) | 0}% · ${sol.toFixed(2)} SOL`]; },
+      SNIPER: () => { const d = rnd(-3, 25); return d > 15 ? [0, `price already +${d.toFixed(0)}% vs leader`] : [Math.max(0, 1 - d / 15), `drift ${d.toFixed(1)}%`]; },
+      NARRATIVE: () => [rnd(0.4, 0.85), Math.random() < 0.6 ? "has socials" : "no socials"],
+      EXIT: () => S.positions.length >= 4 ? [0, "max positions"] : [1 - S.positions.length / 4, `slots ${4 - S.positions.length}/4`],
+    };
+    const W = { SCAN: 0.15, WHALE: 0.2, NARRATIVE: 0.1, SNIPER: 0.2, RISK: 0.25, EXIT: 0.1 };
+    let score = 0, veto = null;
+    for (const a of AGENTS) { const [sc, note] = notes[a](); S.agents[a] = { score: sc, note }; score += sc * W[a]; if (sc === 0 && !veto) veto = a + ": " + note; emit(a); }
+    if (veto) score = 0;
+    log("signal", `bot.signal("${sym}")  score=${score.toFixed(2)}  agents=${AGENTS.filter((a) => S.agents[a].score >= 0.5).length}/6  ← ${leader}`);
+    if (veto || score < 0.75) { S.skipped++; S.consensus = { symbol: sym, score, decision: "SKIP" }; log("skip", `skip ${sym}  ${veto || "score " + score.toFixed(2) + " < 0.75"}`); return; }
+    S.consensus = { symbol: sym, score, decision: "ENTER" };
+    const size = Math.min(S.equitySol * 0.12, 0.25, S.cashSol - 0.02);
+    if (size <= 0.005) { S.skipped++; return; }
+    log("enter", `const entry = await bot.enter({ mint:"${sym.slice(1, 5)}…${Math.random().toString(36).slice(2, 6)}", size:${size.toFixed(3)} })`);
+    log("fill", `✓ filled tx ${Math.random().toString(36).slice(2, 7)}…  sl -12%  tp +35%`);
+    S.cashSol -= size; S.copies++;
+    // outcome drawn up front: realistic mix — most trades lose small, some win, a few gap through the stop
+    const r = Math.random();
+    const outcome = r < 0.38 ? rnd(0.35, 0.9) : r < 0.5 ? rnd(0.05, 0.3) : r < 0.9 ? -rnd(0.12, 0.2) : -rnd(0.4, 0.95);
+    S.positions.push({ sym, leader, size, value: size, outcome, born: simT, life: rnd(5, 45) * 60000 });
+    S.feed.unshift({ t: simT, kind: "mirror", leader, symbol: sym, sol: size }); S.feed.splice(40);
+  }
+
+  function step() {
+    simT += speed * 60000;
+    if (Math.random() < 0.16 * speed) signal();
+    for (const p of [...S.positions]) {
+      const k = Math.min(1, (simT - p.born) / p.life);
+      p.value = p.size * (1 + p.outcome * k + (k < 1 ? rnd(-0.04, 0.04) : 0));
+      if (k >= 1) {
+        S.cashSol += p.value; const pnlUsd = (p.value - p.size) * SOL_USD; const win = pnlUsd > 0;
+        win ? S.wins++ : S.losses++;
+        S.positions = S.positions.filter((x) => x !== p);
+        const reason = p.outcome >= 0.35 ? "take-profit" : p.outcome > 0 ? "follow-out" : p.outcome > -0.25 ? "stop-loss" : "stop-loss (gapped)";
+        log("exit", `exit ${p.sym} ${pnlUsd >= 0 ? "+" : "−"}$${Math.abs(pnlUsd).toFixed(2)}  ${reason}`);
+        S.feed.unshift({ t: simT, kind: "exit", leader: p.leader, symbol: p.sym, sol: p.value, pnlUsd }); S.feed.splice(40);
+        S.equitySol = S.cashSol + S.positions.reduce((s, x) => s + x.value, 0);
+        S.markers.push({ t: simT, usd: S.equitySol * SOL_USD, label: `${p.sym} ${pnlUsd >= 0 ? "+" : "−"}$${Math.abs(pnlUsd).toFixed(0)}`, win });
+      }
+    }
+    S.equitySol = S.cashSol + S.positions.reduce((s, x) => s + x.value, 0);
+    S.equity.push({ t: simT, usd: S.equitySol * SOL_USD }); if (S.equity.length > 1500) S.equity.shift();
+    const hours = (simT - t0) / 3600000;
+    $("sessionRange").textContent = `24H · ${hhmm(t0)} → ${hhmm(simT)}`;
+    tickClock(simT, 92 - hours * 3.7);
+    if (hours >= 24) {
+      clearInterval(loop); log("info", "session complete · 24h"); $("modePill").textContent = "DONE"; $("modePill").classList.add("done");
+    }
+    render(S);
+  }
+  // pre-roll a little history so the first frame is not empty
+  for (let i = 0; i < 90; i++) step();
+  const loop = setInterval(step, 250);
+}
+})();
+</script>

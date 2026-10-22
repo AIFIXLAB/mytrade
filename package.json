@@ -1,0 +1,15 @@
+{
+  "name": "copybot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Solana memecoin copy-trading bot: watch leader wallets, 6-agent filter, Jupiter execution, local dashboard",
+  "engines": { "node": ">=22.6" },
+  "scripts": {
+    "start": "node --experimental-strip-types --no-warnings src/index.ts",
+    "test": "node --experimental-strip-types --no-warnings test/selftest.ts",
+    "sim": "node --experimental-strip-types --no-warnings test/sim.ts",
+    "build:web": "node scripts/build-web.mjs",
+    "typecheck": "tsc --noEmit"
+  }
+}

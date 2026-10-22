@@ -1,0 +1,4 @@
+[
+  { "address": "PASTE_LEADER_WALLET_1", "label": "leader1", "weight": 0.5 },
+  { "address": "PASTE_LEADER_WALLET_2", "label": "leader2", "weight": 0.5 }
+]
