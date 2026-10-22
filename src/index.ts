@@ -5,10 +5,11 @@ import { loadKeypair } from "./solana.ts";
 import { Watcher } from "./watcher.ts";
 import { Engine } from "./engine.ts";
 import { createSupabaseSync } from "./supabase.ts";
+import { scanOnce } from "./scanner.ts";
 
 if (!config.rpcUrl || !config.jupApiKey) { console.error("Set RPC_URL and JUP_API_KEY in .env (copy .env.example → .env)"); process.exit(1); }
 const leaders = loadLeaders();
-if (!leaders.length) { console.error("No leader wallets. Copy wallets.example.json → wallets.json and add addresses."); process.exit(1); }
+if (!leaders.length && !config.scanEnabled) { console.error("Nothing to do: add wallets to wallets.json or set SCAN_ENABLED=true."); process.exit(1); }
 
 const kp = config.secretKey ? loadKeypair(config.secretKey) : null;
 if (config.mode === "live" && !kp) { console.error("MODE=live requires WALLET_SECRET_KEY"); process.exit(1); }
@@ -49,7 +50,27 @@ createServer((req, res) => {
 await engine.init();
 watcher.onStatus = (s) => console.log("[watch]", s);
 watcher.onTrade = (t) => { engine.onLeaderTrade(t).catch((e) => console.error("trade handler", e)); };
-watcher.start();
+if (leaders.length) watcher.start();
+else console.log("[watch] no wallets in wallets.json → copy-trading off, scanner only");
+
+// ---------- momentum scanner ----------
+if (config.scanEnabled) {
+  let scanning = false, lastNote = "";
+  const tick = async () => {
+    if (scanning) return;
+    scanning = true;
+    try {
+      const { checked, hits } = await scanOnce();
+      const note = `[scan] checked ${checked} coins · ${hits.length} moving`;
+      if (note !== lastNote) { console.log(note); lastNote = note; }
+      for (const h of hits.slice(0, 3)) await engine.onScanHit(h);
+    } catch (e: any) { console.error("[scan]", e.message); }
+    finally { scanning = false; }
+  };
+  tick();
+  setInterval(tick, config.scanIntervalSec * 1000);
+  console.log(`scanner on · every ${config.scanIntervalSec}s · TP +${config.scanTakeProfitPct * 100}% · SL -${config.scanStopLossPct * 100}% · max hold ${config.scanMaxHoldMin}m`);
+}
 
 let monitoring = false;
 setInterval(async () => {

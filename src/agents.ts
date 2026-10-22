@@ -3,6 +3,7 @@
 import { config } from "./config.ts";
 import type { LeaderTrade } from "./watcher.ts";
 import type { TokenInfo, RugReport, OnchainChecks } from "./market.ts";
+import type { Momentum } from "./scanner.ts";
 
 export type AgentName = "SCAN" | "WHALE" | "NARRATIVE" | "SNIPER" | "RISK" | "EXIT";
 export interface Vote { agent: AgentName; score: number; note: string; veto?: boolean; }
@@ -18,6 +19,7 @@ export interface Ctx {
   openPositions: number;
   alreadyHolding: boolean;
   dailyPnlPct: number;
+  momentum?: Momentum;                // set when the signal came from the scanner, not a wallet
 }
 
 const clamp = (x: number) => Math.max(0, Math.min(1, x));
@@ -35,6 +37,7 @@ function scan(c: Ctx): Vote {
 }
 
 function whale(c: Ctx): Vote {
+  if (c.momentum) return { agent: "WHALE", score: c.momentum.score, note: c.momentum.note };
   const { wins, losses } = c.leaderStats;
   const n = wins + losses;
   const wr = n >= 3 ? wins / n : 0.6; // prior until we have history
@@ -66,6 +69,10 @@ async function narrative(c: Ctx): Promise<Vote> {
 }
 
 function sniper(c: Ctx): Vote {
+  if (c.momentum) {
+    const m = c.momentum.changeM5;
+    return { agent: "SNIPER", score: clamp(1 - Math.abs(m - 8) / 20), note: `5m ${m > 0 ? "+" : ""}${m}% · 1h ${c.momentum.changeH1}%` };
+  }
   const d = c.entryDriftPct;
   if (d === null) return { agent: "SNIPER", score: 0.4, note: "no quote" };
   if (d > config.maxEntryDriftPct) return { agent: "SNIPER", score: 0.1, note: `price already +${(d * 100).toFixed(0)}% vs leader`, veto: true };

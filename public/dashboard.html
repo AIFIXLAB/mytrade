@@ -37,6 +37,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 .num { font-variant-numeric: tabular-nums; }
 
 /* menubar */
@@ -168,15 +169,12 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .controls button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .controls .note { margin-left: auto; }
 .banner { margin: 0 18px 10px; padding: 8px 12px; border-radius: 8px; border: 1px dashed #6b5420; color: var(--amber); font-family: var(--mono); font-size: 11px; line-height: 1.5; }
-.login { margin: 0 18px 12px; padding: 14px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--win-2); display: grid; gap: 10px; }
-.login h2 { margin: 0; font-size: 15px; font-weight: 600; }
-.login p { margin: 0; color: var(--fg-2); font-size: 12.5px; line-height: 1.5; }
-.login form { display: flex; gap: 8px; flex-wrap: wrap; }
-.login input { flex: 1 1 220px; min-width: 0; font: 13px var(--mono); color: var(--fg); background: #060e0b; border: 1px solid var(--line-2); border-radius: 7px; padding: 8px 10px; }
-.login input:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
-.login button { font: 600 12px var(--mono); color: #04110c; background: var(--green); border: 0; border-radius: 7px; padding: 8px 14px; cursor: pointer; }
-.login button:disabled { opacity: 0.5; cursor: default; }
-.login .msg { font-family: var(--mono); font-size: 11.5px; color: var(--amber); }
+.pin { margin: 0 18px 12px; padding: 18px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--win-2); display: grid; gap: 12px; justify-items: start; }
+.pin h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.pin p { margin: 0; color: var(--fg-2); font-size: 12.5px; }
+.pin input { width: 9.5em; max-width: 100%; font: 600 26px var(--mono); letter-spacing: 0.5em; text-align: center; color: var(--fg); background: #060e0b; border: 1px solid var(--line-2); border-radius: 9px; padding: 10px 0 10px 0.5em; }
+.pin input:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
+.pin .msg { font-family: var(--mono); font-size: 11.5px; color: var(--amber); min-height: 1.2em; }
 .pill.off { color: var(--red); border-color: #5a2626; background: #ff6b6b14; }
 @media (prefers-reduced-motion: reduce) { .pill::before, .cursor { animation: none; } }
 </style>
@@ -209,11 +207,11 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
       <div class="meta"><span id="sessionRange" class="num">24H</span><span class="pill demo" id="modePill">DEMO</span></div>
     </div>
     <div class="banner" id="banner">Demo mode: everything on this page is simulated, not real trades. Run the bot on your own computer and open http://localhost:8787 to see live or paper-trading data here.</div>
-    <div class="login" id="login" hidden>
-      <h2>Sign in to see your bot</h2>
-      <p>We'll email you a login link. Only emails listed in the dashboard_owners table can see data.</p>
-      <form id="loginForm"><input id="loginEmail" type="email" required placeholder="you@email.com" autocomplete="email"><button id="loginBtn" type="submit">Send login link</button></form>
-      <div class="msg" id="loginMsg"></div>
+    <div class="pin" id="pinBox" hidden>
+      <h2>Enter PIN</h2>
+      <p>Enter your 4-digit PIN to see your bot.</p>
+      <input id="pinInput" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" aria-label="4-digit PIN">
+      <div class="msg" id="pinMsg"></div>
     </div>
     <div class="stats">
       <div class="stat"><label>Balance</label><div class="v num" id="sBal">—</div><small id="sBalSub">—</small></div>
@@ -319,10 +317,10 @@ function render(s) {
     const ic = `<span class="tk" style="background:hsl(${hue(sym)} 70% 62%)">${esc(sym[0] || "?")}</span>`;
     if (f.kind === "exit") {
       const cls = (f.pnlUsd ?? 0) >= 0 ? "pos" : "neg";
-      return `<div class="fi">${ic}<div style="min-width:0"><div class="a">${esc(f.leader)} sold ${esc(f.symbol)} · exit copied</div><div class="b">${f.sol.toFixed(2)} SOL · ${hhmm(f.t)}</div></div><div class="r ${cls}">${fmtUsd(f.pnlUsd ?? 0, true)}</div></div>`;
+      return `<div class="fi">${ic}<div style="min-width:0"><div class="a">${f.leader === "scanner" ? "scan exit " + esc(f.symbol) : esc(f.leader) + " sold " + esc(f.symbol) + " · exit copied"}</div><div class="b">${f.sol.toFixed(2)} SOL · ${hhmm(f.t)}</div></div><div class="r ${cls}">${fmtUsd(f.pnlUsd ?? 0, true)}</div></div>`;
     }
-    return `<div class="fi">${ic}<div style="min-width:0"><div class="a">mirror ${esc(f.leader)} → BUY ${esc(f.symbol)}</div><div class="b">${f.sol.toFixed(2)} SOL · ${hhmm(f.t)}</div></div><div class="r copied">COPIED</div></div>`;
-  }).join("") : '<div class="empty">No copied trades yet. Waiting for a leader wallet to buy.</div>';
+    return `<div class="fi">${ic}<div style="min-width:0"><div class="a">${f.leader === "scanner" ? "scan → BUY " + esc(f.symbol) + " · momentum" : "mirror " + esc(f.leader) + " → BUY " + esc(f.symbol)}</div><div class="b">${f.sol.toFixed(2)} SOL · ${hhmm(f.t)}</div></div><div class="r copied">${f.leader === "scanner" ? "BOUGHT" : "COPIED"}</div></div>`;
+  }).join("") : '<div class="empty">No trades yet. Waiting for a coin to start moving or a leader wallet to buy.</div>';
 
   if (s.consensus) {
     $("cSym").textContent = s.consensus.symbol;
@@ -477,69 +475,90 @@ if (SB && window.supabase) {
   startDemo();
 }
 
-/* ---------------- Supabase mode (hosted on Vercel) ---------------- */
+/* ---------------- Supabase mode (hosted on Vercel, 4-digit PIN checked by the database) ---------------- */
 async function startSupabase() {
   const botId = SB.botId || "main";
-  const client = window.supabase.createClient(SB.url, SB.anonKey);
-  setMode("live"); $("banner").hidden = true;
+  const client = window.supabase.createClient(SB.url, SB.anonKey, { auth: { persistSession: false } });
+  const KEY = "mirror_pin_" + botId;
   const pill = $("modePill");
-  let lastUpdate = 0, loading = false;
+  const store = { get() { try { return localStorage.getItem(KEY) || ""; } catch { return ""; } }, set(v) { try { v ? localStorage.setItem(KEY, v) : localStorage.removeItem(KEY); } catch {} } };
+  const ERR = { bad_pin: "Wrong PIN.", locked: "Too many wrong tries. Wait 15 minutes and try again.", no_pin_set: "No PIN set yet. Run supabase/schema.sql first.", no_data: "PIN OK, but no data yet. Is the bot running with SUPABASE_URL set?" };
+  let pin = store.get(), lastUpdate = 0, loading = false, timers = [];
+  $("banner").hidden = true;
 
-  async function load() {
-    if (loading) return; loading = true;
+  async function call(fn, args) {
+    const { data, error } = await client.rpc(fn, args);
+    if (error) throw new Error(error.message);
+    return data || {};
+  }
+  function lock(msg) {
+    timers.forEach(clearInterval); timers = []; store.set(""); pin = "";
+    pill.className = "pill off"; pill.textContent = "LOCKED";
+    $("pinBox").hidden = false; $("pinMsg").textContent = msg || "";
+    $("controls").innerHTML = '<span class="note" id="ctlNote">locked</span>';
+    const inp = $("pinInput"); inp.value = ""; inp.disabled = false; inp.focus();
+  }
+  async function tryPin(p) {
+    $("pinInput").disabled = true; $("pinMsg").textContent = "checking…";
     try {
-      const { data, error } = await client.from("bot_state").select("snapshot, updated_at").eq("id", botId).maybeSingle();
-      if (error) throw error;
-      if (!data) { $("ctlNote").textContent = "no data yet: is the bot running with SUPABASE_URL set?"; return; }
-      lastUpdate = Date.parse(data.updated_at);
-      setMode("live", data.snapshot); render(data.snapshot); freshness();
-    } catch (e) { $("ctlNote").textContent = "read failed: " + (e.message || e); }
+      const r = await call("get_dashboard", { p_pin: p, p_bot: botId });
+      if (r.error && r.error !== "no_data") return lock(ERR[r.error] || r.error);
+      pin = p; store.set(p); $("pinBox").hidden = true;
+      unlocked(r);
+    } catch (e) { lock("Could not reach Supabase: " + e.message); }
+  }
+  $("pinInput").addEventListener("input", (e) => {
+    e.target.value = e.target.value.replace(/\D/g, "").slice(0, 4);
+    if (e.target.value.length === 4) tryPin(e.target.value);
+  });
+
+  function apply(r) {
+    if (r.error === "no_data") { $("ctlNote").textContent = ERR.no_data; return; }
+    lastUpdate = Date.parse(r.updated_at);
+    setMode("live", r.snapshot); render(r.snapshot); freshness();
+  }
+  async function load() {
+    if (loading || !pin) return; loading = true;
+    try {
+      const r = await call("get_dashboard", { p_pin: pin, p_bot: botId });
+      if (r.error && r.error !== "no_data") return lock(ERR[r.error] || r.error);
+      apply(r);
+    } catch (e) { $("ctlNote").textContent = "read failed: " + e.message; }
     finally { loading = false; }
   }
   function freshness() {
-    const age = (Date.now() - lastUpdate) / 1000;
     tickClock(Date.now(), 92);
     if (!lastUpdate) return;
+    const age = (Date.now() - lastUpdate) / 1000;
     if (age > 60) { pill.className = "pill off"; pill.textContent = "OFFLINE"; }
     $("ctlNote").textContent = age > 60 ? `bot offline · last update ${Math.round(age / 60)} min ago` : `updated ${Math.max(0, Math.round(age))}s ago`;
   }
   async function send(cmd) {
-    const { error } = await client.from("bot_commands").insert({ bot_id: botId, cmd });
-    $("ctlNote").textContent = error ? "command failed: " + error.message : `${cmd} sent · the bot picks it up within 5s`;
+    $("ctlNote").textContent = "sending " + cmd + "…";
+    try {
+      const r = await call("send_command", { p_pin: pin, p_cmd: cmd, p_bot: botId });
+      if (r.error) return r.error === "bad_pin" || r.error === "locked" ? lock(ERR[r.error]) : ($("ctlNote").textContent = "command failed: " + r.error);
+      $("ctlNote").textContent = `${cmd} sent · the bot picks it up within 5s`;
+    } catch (e) { $("ctlNote").textContent = "command failed: " + e.message; }
   }
-  function controls(email) {
+  function unlocked(first) {
+    setMode("live");
     const c = $("controls");
-    c.innerHTML = `<button id="killBtn" class="danger" type="button">Close all positions and stop</button><button id="resumeBtn" type="button">Resume entries</button><button id="outBtn" type="button">Sign out</button><span class="note"><span id="ctlNote">connecting…</span> · ${esc(email)}</span>`;
+    c.innerHTML = `<button id="killBtn" class="danger" type="button">Close all positions and stop</button><button id="resumeBtn" type="button">Resume entries</button><button id="lockBtn" type="button">Lock</button><span class="note" id="ctlNote">connecting…</span>`;
     let armed = false;
     $("killBtn").onclick = () => {
       if (!armed) { armed = true; $("killBtn").textContent = "Click again to confirm"; setTimeout(() => { armed = false; $("killBtn").textContent = "Close all positions and stop"; }, 4000); return; }
       armed = false; $("killBtn").textContent = "Close all positions and stop"; send("kill");
     };
     $("resumeBtn").onclick = () => send("resume");
-    $("outBtn").onclick = async () => { await client.auth.signOut(); location.reload(); };
-  }
-  function showLogin() {
-    $("login").hidden = false;
-    pill.className = "pill off"; pill.textContent = "LOCKED";
-    $("controls").innerHTML = '<span class="note" id="ctlNote">signed out</span>';
-    $("loginForm").onsubmit = async (e) => {
-      e.preventDefault();
-      $("loginBtn").disabled = true; $("loginMsg").textContent = "sending…";
-      const { error } = await client.auth.signInWithOtp({ email: $("loginEmail").value.trim(), options: { emailRedirectTo: location.origin + location.pathname, shouldCreateUser: true } });
-      $("loginBtn").disabled = false;
-      $("loginMsg").textContent = error ? "Could not send: " + error.message : "Check your inbox and open the link on this device.";
-    };
+    $("lockBtn").onclick = () => lock("");
+    if (first) apply(first);
+    // poll every 10 s, and only while the tab is visible (Supabase free plan: 5 GB egress/month)
+    timers.push(setInterval(() => { if (document.visibilityState === "visible") load(); }, 10000), setInterval(freshness, 5000));
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") load(); });
   }
 
-  const { data: { session } } = await client.auth.getSession();
-  if (!session) { showLogin(); return; }
-  controls(session.user.email || "");
-  await load();
-  client.channel("bot_state_" + botId)
-    .on("postgres_changes", { event: "*", schema: "public", table: "bot_state", filter: "id=eq." + botId }, () => load())
-    .subscribe();
-  setInterval(load, 20000);      // fallback if realtime drops
-  setInterval(freshness, 5000);
+  if (pin) tryPin(pin); else lock("");
 }
 
 /* ---------------- demo simulation (clearly fake) ---------------- */

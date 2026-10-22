@@ -17,11 +17,26 @@ export interface Order {
   errorMessage?: string;
 }
 
+// Free Jupiter keys allow 60 requests/min (sliding window). Stay under it with a shared limiter.
+const callTimes: number[] = [];
+async function slot() {
+  const max = config.jupMaxPerMin;
+  for (;;) {
+    const now = Date.now();
+    while (callTimes.length && now - callTimes[0] > 60_000) callTimes.shift();
+    if (callTimes.length < max) { callTimes.push(now); return; }
+    await new Promise((r) => setTimeout(r, 60_000 - (now - callTimes[0]) + 50));
+  }
+}
+export function jupCallsLastMinute() { const now = Date.now(); return callTimes.filter((t) => now - t <= 60_000).length; }
+
 export async function getOrder(p: { inputMint: string; outputMint: string; amount: bigint | string; taker?: string; slippageBps?: number }): Promise<Order> {
   const q = new URLSearchParams({ inputMint: p.inputMint, outputMint: p.outputMint, amount: String(p.amount) });
   if (p.taker) q.set("taker", p.taker);
   if (p.slippageBps) q.set("slippageBps", String(p.slippageBps));
-  const res = await fetch(`${BASE}/order?${q}`, { headers: { "x-api-key": config.jupApiKey } });
+  await slot();
+  let res = await fetch(`${BASE}/order?${q}`, { headers: { "x-api-key": config.jupApiKey } });
+  if (res.status === 429) { await new Promise((r) => setTimeout(r, 2000)); await slot(); res = await fetch(`${BASE}/order?${q}`, { headers: { "x-api-key": config.jupApiKey } }); }
   const j: any = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(`jup order HTTP ${res.status}: ${j.error ?? j.errorMessage ?? ""}`);
   return j as Order;

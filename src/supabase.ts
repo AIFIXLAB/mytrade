@@ -2,6 +2,7 @@
 // Uses the PostgREST HTTP API directly — no supabase-js dependency.
 // The SERVICE ROLE key lives only on the machine running the bot. Never put it in the website.
 import type { ClosedTrade } from "./engine.ts";
+import { config } from "./config.ts";
 
 export interface SupabaseSync {
   pushState(snapshot: any): void;
@@ -34,7 +35,7 @@ export function createSupabaseSync(url: string, serviceKey: string, botId = "mai
     } catch (e: any) {
       if (e.message !== lastErr) console.error("[supabase]", (lastErr = e.message));
     } finally { inFlight = false; }
-  }, 3000);
+  }, config.supabasePushSec * 1000);
 
   return {
     pushState(snapshot) { latest = snapshot; },

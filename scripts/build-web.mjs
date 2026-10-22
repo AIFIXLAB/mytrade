@@ -2,7 +2,14 @@
 // The anon key is meant to be public; Row Level Security in supabase/schema.sql protects the data.
 // NEVER set SUPABASE_SERVICE_ROLE_KEY on Vercel.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-const { SUPABASE_URL = "", SUPABASE_ANON_KEY = "", BOT_ID = "main", SUPABASE_SERVICE_ROLE_KEY } = process.env;
+import { existsSync } from "node:fs";
+// Vercel env vars win; otherwise fall back to supabase/public.json (public values only).
+const pub = existsSync("supabase/public.json") ? JSON.parse(readFileSync("supabase/public.json", "utf8")) : {};
+const SUPABASE_URL = process.env.SUPABASE_URL || pub.url || "";
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || pub.publishableKey || "";
+const BOT_ID = process.env.BOT_ID || pub.botId || "main";
+const { SUPABASE_SERVICE_ROLE_KEY } = process.env;
+if (/sb_secret_|service_role/.test(SUPABASE_ANON_KEY)) { console.error("Refusing to build: that's a SECRET key. Use the publishable key."); process.exit(1); }
 if (SUPABASE_SERVICE_ROLE_KEY) { console.error("Refusing to build: remove SUPABASE_SERVICE_ROLE_KEY from the website's env vars."); process.exit(1); }
 mkdirSync("web", { recursive: true });
 const body = readFileSync("public/dashboard.html", "utf8");

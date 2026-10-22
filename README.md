@@ -43,32 +43,50 @@ npm start                         # เริ่มบอท แล้วเป�
 3. วิธีหยุดฉุกเฉิน: สร้างไฟล์ชื่อ `STOP` ในโฟลเดอร์ (บอทจะหยุดเปิดไม้ใหม่) หรือกดปุ่ม "Close all positions and stop" บนแดชบอร์ด (บอทจะขายทุกไม้และหยุด)
 4. ถ้ากด Ctrl+C ไม้ที่เปิดอยู่จะยังค้างอยู่ รันใหม่เมื่อไหร่บอทจะกลับมาดูแลต่อ (สถานะเก็บไว้ใน `data/state.json`)
 
-## ใช้ร่วมกับ Supabase + Vercel (ดูแดชบอร์ดจากมือถือได้ทุกที่)
+## โหมดสแกน: หาเหรียญที่กำลังเริ่มพุ่งเอง (ไม่ต้องตามใคร)
+
+เปิดไว้ตั้งแต่แรก (`SCAN_ENABLED=true`) และใช้ได้แม้ `wallets.json` จะว่าง
 
 ```
-[บอท]  ← ต้องรันบนเครื่องที่เปิดตลอด 24 ชม. (VPS / Railway / Fly.io / คอมที่บ้าน)
-  │  ใช้ service role key (มีเฉพาะบนเครื่องบอท)
-  ▼
-[Supabase]  bot_state (อัปเดตทุก 3 วิ) · trades (ประวัติทุกไม้) · bot_commands (kill/resume)
-  │  Realtime + Row Level Security (เห็นข้อมูลได้เฉพาะอีเมลที่อนุญาต)
-  ▼
-[Vercel]  หน้าเว็บ static + ล็อกอินด้วย magic link → ดูสด + กดหยุดบอทได้
+ทุก 20 วินาที → DexScreener: เหรียญที่เพิ่งมีโปรไฟล์ / ถูก boost (~100–200 ตัว)
+   ▼  กรอง "กำลังเริ่มขยับ"
+   • ปริมาณซื้อขาย 5 นาทีล่าสุด ≥ 2.5 เท่าของค่าเฉลี่ยในชั่วโมงนั้น
+   • แรงซื้อ ≥ 1.4 เท่าของแรงขาย และมีคนซื้อ ≥ 25 ครั้งใน 5 นาที
+   • ราคาขึ้น +3% ถึง +25% ใน 5 นาที (ยังไม่พุ่งไปไกลแล้ว)
+   • ใน 1 ชั่วโมงยังขึ้นไม่เกิน +150%
+   ▼  6 เอเจนต์ตรวจความเสี่ยง (rug, mint authority, holder, สภาพคล่อง)
+   ▼  ซื้อ → ขายเร็ว: TP +20% · SL −8% · trailing · ถือไม่เกิน 20 นาที
 ```
 
-**ทำไมไม่รันบอทบน Vercel:** Vercel เป็น serverless แต่ละ request ทำงานได้ไม่กี่วินาทีถึงไม่กี่นาทีแล้วถูกปิด จึงเปิด WebSocket ค้างไว้ฟังกระเป๋าตลอดเวลาไม่ได้ และไม่ควรเก็บ private key ไว้บนแพลตฟอร์มเว็บ
+**ข้อเท็จจริง:** ไม่มีใครเห็นการพุ่งก่อนมันเริ่มได้ บอทจับได้แค่ช่วงไม่กี่นาทีแรก หลายเหรียญจะย่อลงทันทีหลังเข้า (คนที่เข้าก่อนขายใส่) ผลที่คาดได้คือ แพ้เล็กๆ บ่อย และชนะใหญ่กว่านาน ๆ ครั้ง ต้องรัน `MODE=paper` ดูตัวเลขจริงก่อนเสมอ ปรับเกณฑ์ได้ทุกตัวใน `.env` (ดู `SCAN_*` ใน `.env.example`)
+
+## ใช้ร่วมกับ Supabase + Vercel (ดูแดชบอร์ดจากมือถือ ใส่รหัส 4 หลัก)
+
+```
+[บอท]  ← รันบนเครื่องที่เปิดตลอด 24 ชม. (VPS / Railway / Fly.io / คอมที่บ้าน)
+  │  ใช้ secret key (มีเฉพาะบนเครื่องบอท) → เขียนข้อมูล
+  ▼
+[Supabase]  bot_state · trades · bot_commands
+  │  หน้าเว็บเรียกได้แค่ get_dashboard(PIN) และ send_command(PIN, cmd)
+  │  ฐานข้อมูลเป็นคนตรวจ PIN (เก็บแบบ hash) · ผิดเกิน 20 ครั้งใน 15 นาที → ล็อก
+  ▼
+[Vercel]  หน้าเว็บ static → ใส่ PIN ครั้งเดียวต่อเครื่อง → ดูสด + ปุ่มหยุด/เปิดบอท
+```
+
+- **รหัสเริ่มต้นคือ `2217`** (ตั้งไว้บรรทัดสุดท้ายของ `supabase/schema.sql`)
+- **เปลี่ยนรหัส:** Supabase → SQL Editor → `select public.set_dashboard_pin('1234');`
+- เครื่องที่ใส่ PIN แล้วจะจำไว้ กดปุ่ม **Lock** เพื่อให้ลืม (เช่น ตอนใช้เครื่องคนอื่น)
+- ถ้ามีคนสุ่มรหัสผิดเกิน 20 ครั้งใน 15 นาที ระบบจะล็อกทุกคน (รวมถึงคุณ) 15 นาที เป็นการแลกกับการกันสุ่มรหัส
+- หยุดบอทโดยไม่ใช้เว็บก็ได้: SQL Editor → `insert into bot_commands (cmd) values ('kill');`
+
+**ทำไมไม่รันบอทบน Vercel:** Vercel เป็น serverless เปิด WebSocket ค้างไว้ฟังกระเป๋าตลอดเวลาไม่ได้ และไม่ควรเก็บ private key ไว้บนแพลตฟอร์มเว็บ
 
 ### ขั้นตอน
 
-1. **Supabase:** สร้างโปรเจกต์ → SQL Editor → วางไฟล์ `supabase/schema.sql` → **แก้อีเมลบรรทัดสุดท้ายเป็นอีเมลของคุณ** → Run
-2. **Supabase → Authentication → URL Configuration:** ใส่ Site URL เป็นโดเมน Vercel ของคุณ เช่น `https://mirror-bot.vercel.app` (ถ้าไม่ใส่ ลิงก์ล็อกอินจะพากลับไปที่ localhost) และแนะนำให้ปิด "Allow new users to sign up" เพราะเราใช้อีเมลเดียว
-3. **บอท:** ในไฟล์ `.env` บนเครื่องที่รันบอท ใส่ `SUPABASE_URL` และ `SUPABASE_SERVICE_ROLE_KEY` (Project Settings → API) แล้ว `npm start` จะเห็นข้อความ `supabase sync on`
-4. **Vercel:** push โปรเจกต์ขึ้น GitHub (ไฟล์ `.env` ถูก .gitignore ไว้แล้ว) → Import ใน Vercel → Environment Variables ใส่
-   - `SUPABASE_URL`
-   - `SUPABASE_ANON_KEY` (คีย์ "anon public" เปิดเผยได้ เพราะ RLS ป้องกันข้อมูลไว้)
-   - ห้ามใส่ `SUPABASE_SERVICE_ROLE_KEY` บน Vercel (สคริปต์ build จะไม่ยอม build ถ้าเจอ)
-   
-   ไฟล์ `vercel.json` ตั้งค่าไว้แล้ว กด Deploy ได้เลย
-5. เปิดเว็บ → ใส่อีเมล → กดลิงก์ในอีเมล → เห็นข้อมูลสด ถ้าบอทไม่ส่งข้อมูลเกิน 60 วินาที ป้ายจะเปลี่ยนเป็น OFFLINE
+1. **Supabase:** SQL Editor → วางไฟล์ `supabase/schema.sql` → Run (รันทับเวอร์ชันเก่าได้)
+2. **บอท:** ในไฟล์ `.env` บนเครื่องที่รันบอท ใส่ `SUPABASE_URL` และ `SUPABASE_SERVICE_ROLE_KEY` = secret key (`sb_secret_…` จาก Project Settings → API Keys) แล้ว `npm start` จะเห็นข้อความ `supabase sync on`
+3. **Vercel:** แตก `vercel-site.zip` แล้วรัน `npx vercel deploy --prod` หรือ push โปรเจกต์ขึ้น GitHub → Import → ตั้ง env `SUPABASE_URL` กับ `SUPABASE_ANON_KEY` (ใส่ publishable key) → Deploy **ห้ามใส่ secret key บน Vercel** (สคริปต์ build จะไม่ยอม build ถ้าเจอ)
+4. เปิดเว็บ → ใส่ 2217 → เห็นข้อมูลสด (อัปเดตทุก 3 วินาที) ถ้าบอทไม่ส่งข้อมูลเกิน 60 วินาที ป้ายจะเปลี่ยนเป็น OFFLINE
 
 ### ที่รันบอทตลอด 24 ชม.
 
@@ -101,7 +119,7 @@ npm start                         # เริ่มบอท แล้วเป�
 | `src/index.ts` | เซิร์ฟเวอร์แดชบอร์ด (SSE) และลูปหลัก |
 | `public/dashboard.html` | หน้าตาแบบในวิดีโอ (เปิดตรงๆ จะเป็นโหมดเดโม) |
 | `src/supabase.ts` | ส่งสถานะ/ประวัติเทรดเข้า Supabase และรับคำสั่ง kill/resume |
-| `supabase/schema.sql` | ตาราง + RLS + Realtime |
+| `supabase/schema.sql` | ตาราง + RLS + ฟังก์ชันตรวจ PIN |
 | `scripts/build-web.mjs`, `vercel.json` | build หน้าเว็บสำหรับ Vercel |
 | `Dockerfile` | รันบอทบน VPS/Railway/Fly |
 

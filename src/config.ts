@@ -45,6 +45,28 @@ export const config = {
   minLeaderBuySol: num("MIN_LEADER_BUY_SOL", 0.3),
   pollMs: num("POSITION_POLL_MS", 4000),
   port: num("PORT", 8787),
+  jupMaxPerMin: num("JUP_MAX_PER_MIN", 50),        // free Jupiter key = 60/min; keep headroom
+  supabasePushSec: num("SUPABASE_PUSH_SEC", 10),   // how often the dashboard row is updated
+
+  // ---- momentum scanner (finds coins itself, no wallets needed) ----
+  scanEnabled: (process.env.SCAN_ENABLED ?? "true") === "true",
+  scanIntervalSec: num("SCAN_INTERVAL_SEC", 20),
+  scanMinVolSpike: num("SCAN_MIN_VOL_SPIKE", 2.5),     // 5m volume ≥ 2.5× the hour's average 5m
+  scanMinBuysM5: num("SCAN_MIN_BUYS_M5", 25),
+  scanMinBuyRatio: num("SCAN_MIN_BUY_RATIO", 1.4),     // buys/sells in last 5m
+  scanMinChangeM5: num("SCAN_MIN_CHANGE_M5", 3),       // already moving up ≥ 3% …
+  scanMaxChangeM5: num("SCAN_MAX_CHANGE_M5", 25),      // … but not already vertical
+  scanMaxChangeH1: num("SCAN_MAX_CHANGE_H1", 150),
+  scanMinFdv: num("SCAN_MIN_FDV", 80_000),
+  scanMaxFdv: num("SCAN_MAX_FDV", 30_000_000),
+  scanCooldownMin: num("SCAN_COOLDOWN_MIN", 120),      // don't re-buy the same coin for 2h
+  scanMaxEntriesPerHour: num("SCAN_MAX_ENTRIES_PER_HOUR", 6),
+  // quick in-and-out exits for scanner trades
+  scanTakeProfitPct: num("SCAN_TAKE_PROFIT_PCT", 0.2),
+  scanStopLossPct: num("SCAN_STOP_LOSS_PCT", 0.08),
+  scanTrailingArmPct: num("SCAN_TRAILING_ARM_PCT", 0.1),
+  scanTrailingDropPct: num("SCAN_TRAILING_DROP_PCT", 0.06),
+  scanMaxHoldMin: num("SCAN_MAX_HOLD_MIN", 20),
 
   narrativeLlmUrl: process.env.NARRATIVE_LLM_URL ?? "",   // OpenAI-compatible /chat/completions (e.g. xAI)
   narrativeLlmKey: process.env.NARRATIVE_LLM_KEY ?? "",
@@ -54,7 +76,7 @@ export const config = {
 export function loadLeaders(): Leader[] {
   const file = existsSync("wallets.json") ? "wallets.json" : "wallets.example.json";
   const list = JSON.parse(readFileSync(file, "utf8")) as Leader[];
-  return list.filter((l) => l.address && !l.address.startsWith("PASTE"));
+  return list.filter((l) => l.address && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(l.address));
 }
 
 export function wsUrlFor(rpcUrl: string) {

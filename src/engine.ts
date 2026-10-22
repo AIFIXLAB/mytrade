@@ -1,10 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { config, type Leader } from "./config.ts";
-import { consensus, type AgentName, type Vote } from "./agents.ts";
+import { consensus, type AgentName } from "./agents.ts";
 import { dexInfo, rugcheck, onchainChecks } from "./market.ts";
 import { quoteOut, swap } from "./jupiter.ts";
 import { rpc, SOL_MINT, USDC_MINT, LAMPORTS, type Keypair } from "./solana.ts";
 import type { LeaderTrade } from "./watcher.ts";
+import type { ScanHit } from "./scanner.ts";
+
+export interface Exits { tp: number; sl: number; arm: number; drop: number; holdMin: number; }
 
 export interface Position {
   mint: string; symbol: string; leader: string;
@@ -12,6 +15,8 @@ export interface Position {
   solIn: number; solOut: number;
   openedAt: number; peakValueSol: number; lastValueSol: number;
   quoteFails: number;
+  decimals?: number;
+  exits?: Exits;              // per-position exit rules (scanner trades use tighter ones)
 }
 
 export interface ClosedTrade {
@@ -42,6 +47,9 @@ export class Engine {
   s: State;
   private recentBuys = new Map<string, Map<string, number>>(); // mint → leader → ts
   private busy = new Set<string>();
+  private scanCooldown = new Map<string, number>(); // mint → last scanner entry ts
+  private scanEntries: number[] = [];
+  private scanSkipped = new Map<string, number>();  // mint → when the scanner last skipped it               // timestamps of scanner entries (rate limit)
   onChange: () => void = () => {};
   onClosed: (t: ClosedTrade) => void = () => {};
 
@@ -159,7 +167,7 @@ export class Engine {
         return;
       }
       this.s.consensus = { symbol: sym, score, decision: "ENTER" };
-      await this.enter(t, sym, size, quotedTokens, votes);
+      await this.enter(t.mint, t.leader.label, sym, size, quotedTokens);
     } finally {
       this.busy.delete(t.mint);
     }
@@ -170,30 +178,83 @@ export class Engine {
     return Math.max(0, Math.min(free, this.s.equitySol * config.maxRiskPct, config.maxSolPerTrade));
   }
 
-  private async enter(t: LeaderTrade, sym: string, size: number, quotedTokens: bigint, _votes: Vote[]) {
+  private async enter(mint: string, label: string, sym: string, size: number, quotedTokens: bigint, exits?: Exits) {
     const lamports = BigInt(Math.floor(size * LAMPORTS));
-    this.log("enter", `const entry = await bot.enter({ mint:"${t.mint.slice(0, 4)}…${t.mint.slice(-4)}", size:${size.toFixed(3)} })`);
+    const ex = exits ?? this.defaultExits();
+    this.log("enter", `const entry = await bot.enter({ mint:"${mint.slice(0, 4)}…${mint.slice(-4)}", size:${size.toFixed(3)} })`);
     try {
       let tokens: bigint, solIn: number, sig = "paper";
       if (config.mode === "live") {
-        const r = await swap(this.kp!, SOL_MINT, t.mint, lamports, config.slippageBps);
+        const r = await swap(this.kp!, SOL_MINT, mint, lamports, config.slippageBps);
         tokens = BigInt(r.outputAmountResult ?? r.quotedOut);
         solIn = Number(r.inputAmountResult ?? lamports) / LAMPORTS;
         sig = r.signature ?? "?";
       } else {
-        tokens = (quotedTokens > 0n ? quotedTokens : await quoteOut(SOL_MINT, t.mint, lamports)) * 995n / 1000n; // assume 0.5% worse fill
+        tokens = (quotedTokens > 0n ? quotedTokens : await quoteOut(SOL_MINT, mint, lamports)) * 995n / 1000n; // assume 0.5% worse fill
         solIn = size + 0.0002; // network + priority fee estimate
       }
       this.s.cashSol -= solIn;
-      this.s.positions.push({ mint: t.mint, symbol: sym, leader: t.leader.label, tokenRaw: tokens.toString(), solIn, solOut: 0, openedAt: Date.now(), peakValueSol: solIn, lastValueSol: solIn, quoteFails: 0 });
+      const decimals = await onchainChecks(mint).then((c) => c.decimals).catch(() => undefined);
+      this.s.positions.push({ mint, symbol: sym, leader: label, tokenRaw: tokens.toString(), solIn, solOut: 0, openedAt: Date.now(), peakValueSol: solIn, lastValueSol: solIn, quoteFails: 0, decimals, exits: ex });
       this.s.copies++;
-      this.s.feed.unshift({ t: Date.now(), kind: "mirror", leader: t.leader.label, symbol: sym, sol: solIn });
+      this.s.feed.unshift({ t: Date.now(), kind: "mirror", leader: label, symbol: sym, sol: solIn });
       this.s.feed.splice(60);
-      this.log("fill", `✓ filled tx ${sig.slice(0, 5)}…  sl -${(config.stopLossPct * 100).toFixed(0)}%  tp +${(config.takeProfitPct * 100).toFixed(0)}%`);
+      this.log("fill", `✓ filled tx ${sig.slice(0, 5)}…  sl -${(ex.sl * 100).toFixed(0)}%  tp +${(ex.tp * 100).toFixed(0)}%  max ${ex.holdMin}m`);
       this.markEquity();
     } catch (e: any) {
       this.s.skipped++;
       this.log("error", `entry ${sym} failed: ${e.message}`);
+    }
+  }
+
+  private defaultExits(): Exits {
+    return { tp: config.takeProfitPct, sl: config.stopLossPct, arm: config.trailingArmPct, drop: config.trailingDropPct, holdMin: config.maxHoldMin };
+  }
+
+  // ---------- scanner signals (no wallet: the coin itself is moving) ----------
+  async onScanHit(hit: ScanHit) {
+    const { token, momentum } = hit;
+    const mint = token.mint;
+    const now = Date.now();
+    if (this.busy.has(mint) || this.s.positions.some((p) => p.mint === mint)) return;
+    if (now - (this.scanCooldown.get(mint) ?? 0) < config.scanCooldownMin * 60_000) return;
+    if (now - (this.scanSkipped.get(mint) ?? 0) < 10 * 60_000) return; // skipped recently → don't re-check every tick
+    this.s.signals++;
+    this.scanEntries = this.scanEntries.filter((t) => now - t < 3600_000);
+    const sym = "$" + token.symbol.toUpperCase();
+    if (this.scanEntries.length >= config.scanMaxEntriesPerHour) return;
+    this.busy.add(mint);
+    try {
+      const [rug, chain] = await Promise.all([rugcheck(mint), onchainChecks(mint).catch(() => null)]);
+      const size = this.sizeSol();
+      let quotedTokens = 0n;
+      if (size > 0) { try { quotedTokens = await quoteOut(SOL_MINT, mint, BigInt(Math.floor(size * LAMPORTS))); } catch {} }
+      const dailyPnlPct = this.s.dayStartEquitySol > 0 ? this.s.equitySol / this.s.dayStartEquitySol - 1 : 0;
+      const pseudo: LeaderTrade = { side: "BUY", leader: { address: "scanner", label: "scanner" }, mint, signature: "scan", solAmount: 0, tokenDeltaRaw: 0n, tokenPreRaw: 0n, decimals: 0, soldFraction: 0, blockTime: 0 };
+      const { score, votes, vetoed } = await consensus({
+        trade: pseudo, token, rug, chain, entryDriftPct: 0, momentum,
+        leaderStats: { wins: 0, losses: 0 }, confluence: 0,
+        openPositions: this.s.positions.length, alreadyHolding: false, dailyPnlPct,
+      });
+      for (const v of votes) this.s.agents[v.agent] = { score: v.score, note: v.note };
+      this.log("signal", `scan.signal("${sym}")  score=${score.toFixed(2)}  ${momentum.note}`);
+      const halted = this.s.halted || existsSync("STOP");
+      if (halted || vetoed || score < config.consensusThreshold || size <= 0 || quotedTokens <= 0n) {
+        this.s.skipped++;
+        const why = halted ? "halted (STOP file / kill)" : vetoed ? `${vetoed.agent}: ${vetoed.note}` : size <= 0 ? "no balance" : quotedTokens <= 0n ? "no swap route" : `score ${score.toFixed(2)} < ${config.consensusThreshold}`;
+        this.s.consensus = { symbol: sym, score, decision: "SKIP" };
+        this.scanSkipped.set(mint, now);
+        this.log("skip", `skip ${sym}  ${why}`);
+        return;
+      }
+      this.s.consensus = { symbol: sym, score, decision: "ENTER" };
+      this.scanCooldown.set(mint, now);
+      this.scanEntries.push(now);
+      await this.enter(mint, "scanner", sym, size, quotedTokens, {
+        tp: config.scanTakeProfitPct, sl: config.scanStopLossPct, arm: config.scanTrailingArmPct, drop: config.scanTrailingDropPct, holdMin: config.scanMaxHoldMin,
+      });
+    } finally {
+      this.busy.delete(mint);
     }
   }
 
@@ -207,12 +268,37 @@ export class Engine {
   }
 
   // ---------- position management ----------
+  /** USD price per whole token for up to 30 coins in ONE DexScreener call (doesn't touch the Jupiter quota). */
+  private async dexPrices(mints: string[]): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (!mints.length) return out;
+    try {
+      const r = await fetch(`https://api.dexscreener.com/tokens/v1/solana/${mints.slice(0, 30).join(",")}`, { signal: AbortSignal.timeout(6000) });
+      const list: any[] = r.ok ? await r.json() : [];
+      const liq = new Map<string, number>();
+      for (const p of Array.isArray(list) ? list : []) {
+        const m = p.baseToken?.address, usd = Number(p.priceUsd), l = Number(p.liquidity?.usd ?? 0);
+        if (!m || !(usd > 0) || l < (liq.get(m) ?? -1)) continue;
+        liq.set(m, l); out.set(m, usd);
+      }
+    } catch { /* fall back to Jupiter */ }
+    return out;
+  }
+
   async monitor() {
+    const open = this.s.positions.filter((p) => !this.busy.has(p.mint));
+    const prices = this.s.solUsd > 0 ? await this.dexPrices(open.map((p) => p.mint)) : new Map<string, number>();
     for (const p of [...this.s.positions]) {
       if (this.busy.has(p.mint)) continue;
       try {
-        const out = await quoteOut(p.mint, SOL_MINT, BigInt(p.tokenRaw));
-        p.lastValueSol = Number(out) / LAMPORTS;
+        const usd = prices.get(p.mint);
+        if (usd && p.decimals !== undefined) {
+          // mid-price value minus ~1% for slippage/fees, so TP/SL aren't triggered optimistically
+          p.lastValueSol = (Number(BigInt(p.tokenRaw)) / 10 ** p.decimals) * usd / this.s.solUsd * 0.99;
+        } else {
+          const out = await quoteOut(p.mint, SOL_MINT, BigInt(p.tokenRaw));
+          p.lastValueSol = Number(out) / LAMPORTS;
+        }
         p.quoteFails = 0;
       } catch {
         p.quoteFails++;
@@ -225,11 +311,12 @@ export class Engine {
       const fromPeak = p.peakValueSol > 0 ? 1 - p.lastValueSol / p.peakValueSol : 0;
       const peakPnl = basis > 0 ? p.peakValueSol / basis - 1 : 0;
       const ageMin = (Date.now() - p.openedAt) / 60000;
+      const ex = p.exits ?? this.defaultExits();
       let reason = "";
-      if (pnl >= config.takeProfitPct) reason = "take-profit";
-      else if (pnl <= -config.stopLossPct) reason = "stop-loss";
-      else if (peakPnl >= config.trailingArmPct && fromPeak >= config.trailingDropPct) reason = "trailing-stop";
-      else if (ageMin >= config.maxHoldMin) reason = "time-exit";
+      if (pnl >= ex.tp) reason = "take-profit";
+      else if (pnl <= -ex.sl) reason = "stop-loss";
+      else if (peakPnl >= ex.arm && fromPeak >= ex.drop) reason = "trailing-stop";
+      else if (ageMin >= ex.holdMin) reason = "time-exit";
       if (reason) await this.sell(p, 1, reason);
     }
     this.markEquity();

@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node --experimental-strip-types --no-warnings src/index.ts",
     "test": "node --experimental-strip-types --no-warnings test/selftest.ts",
-    "sim": "node --experimental-strip-types --no-warnings test/sim.ts",
+    "sim": "node --experimental-strip-types --no-warnings test/sim.ts && node --experimental-strip-types --no-warnings test/scan-sim.ts",
     "build:web": "node scripts/build-web.mjs",
     "typecheck": "tsc --noEmit"
   }
